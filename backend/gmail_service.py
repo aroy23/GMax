@@ -1,0 +1,315 @@
+import json
+from typing import Dict, List, Optional, Any
+from datetime import datetime, timedelta
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from google.oauth2.credentials import Credentials
+import time
+
+from gmail_auth import get_credentials
+from config import PUBSUB_TOPIC
+
+class GmailService:
+    def __init__(self, user_id: str, token_data: Optional[Dict] = None):
+        """
+        Initialize Gmail API service for a user
+        
+        Args:
+            user_id: The unique identifier for the user
+            token_data: Optional cached token data
+        """
+        self.user_id = user_id
+        self.credentials = get_credentials(user_id, token_data)
+        self.service = build('gmail', 'v1', credentials=self.credentials)
+        
+    def start_watch(self, label_ids: Optional[List[str]] = None, webhook_url: Optional[str] = None) -> Dict:
+        """
+        Set up Gmail API watch on a user's mailbox
+        
+        Args:
+            label_ids: Optional list of label IDs to filter notifications
+            webhook_url: Optional URL for the push notifications
+            
+        Returns:
+            Watch response with historyId and expiration
+        """
+        try:
+            request_body = {
+                "topicName": PUBSUB_TOPIC,
+                "labelIds": label_ids or ["INBOX"]
+            }
+            
+            # Add webhook URL if provided
+            if webhook_url:
+                print(f"Using webhook URL: {webhook_url}")
+                # Using a custom label to track the webhook URL - Google won't use this
+                # but it helps for debugging
+                request_body["labelFilterAction"] = "include"
+                request_body["webhookUrl"] = webhook_url
+            
+            watch_response = self.service.users().watch(
+                userId='me', 
+                body=request_body
+            ).execute()
+            
+            # Return both the historyId and expiration timestamp
+            return {
+                "historyId": watch_response.get("historyId"),
+                "expiration": watch_response.get("expiration"),
+                "expirationTime": datetime.fromtimestamp(
+                    int(watch_response.get("expiration")) / 1000
+                ).isoformat()
+            }
+        except HttpError as error:
+            print(f"Gmail watch error: {error}")
+            raise
+    
+    def stop_watch(self) -> Dict:
+        """
+        Stop watching a user's mailbox
+        
+        Returns:
+            Success response
+        """
+        try:
+            response = self.service.users().stop(userId='me').execute()
+            return {"success": True, "response": response}
+        except HttpError as error:
+            print(f"Gmail stop watch error: {error}")
+            raise
+    
+    def get_watch_status(self) -> Dict:
+        """
+        Get the current watch status for the user's mailbox
+        
+        Returns:
+            Dictionary with watch status information or error
+        """
+        try:
+            # Gmail API doesn't have a direct method to check watch status
+            # We use the profile endpoint which returns historyId
+            profile = self.service.users().getProfile(userId='me').execute()
+            history_id = profile.get('historyId')
+            
+            # Check if we have a watch expiration stored in our database
+            # This would normally come from database, but we'll need to implement
+            # a dummy check here
+            try:
+                # Try to get labels as a simple way to test API connectivity
+                labels = self.service.users().labels().list(userId='me').execute()
+                label_count = len(labels.get('labels', []))
+                
+                return {
+                    "active": True,  # We don't know for sure, but API works
+                    "historyId": history_id,
+                    "labels": label_count,
+                    "note": "Gmail API doesn't provide direct watch status. This is a best guess."
+                }
+            except HttpError as label_error:
+                # If we can't get labels, there might be an issue with the API
+                return {
+                    "active": False,
+                    "historyId": history_id,
+                    "error": str(label_error)
+                }
+        except HttpError as error:
+            print(f"Gmail get watch status error: {error}")
+            return {
+                "active": False,
+                "error": str(error)
+            }
+    
+    def get_history(self, start_history_id: str) -> List[Dict]:
+        """
+        Get mailbox change history since a specific history ID
+        
+        Args:
+            start_history_id: The history ID to start from
+            
+        Returns:
+            List of history records with message changes
+        """
+        try:
+            results = []
+            page_token = None
+            
+            while True:
+                history_list = self.service.users().history().list(
+                    userId='me',
+                    startHistoryId=start_history_id,
+                    pageToken=page_token,
+                    historyTypes=['messageAdded', 'labelAdded', 'labelRemoved']
+                ).execute()
+                
+                if 'history' in history_list:
+                    results.extend(history_list['history'])
+                
+                page_token = history_list.get('nextPageToken')
+                if not page_token:
+                    break
+            
+            # Extract the latest historyId
+            latest_history_id = history_list.get('historyId', start_history_id)
+            
+            # Process and return the history records
+            return {
+                "latestHistoryId": latest_history_id,
+                "changes": self._process_history_records(results)
+            }
+        except HttpError as error:
+            if error.resp.status == 404:
+                # History ID is too old, need to resync
+                print("History ID is too old, need to resync")
+                return {"error": "historyExpired", "latestHistoryId": None}
+            print(f"Gmail history error: {error}")
+            raise
+    
+    def _process_history_records(self, history_records: List[Dict]) -> List[Dict]:
+        """
+        Process history records to extract message changes
+        
+        Args:
+            history_records: Raw history records from Gmail API
+            
+        Returns:
+            Processed list of message changes
+        """
+        changes = []
+        
+        for record in history_records:
+            # Handle new messages
+            if 'messagesAdded' in record:
+                for msg_added in record['messagesAdded']:
+                    message = msg_added.get('message', {})
+                    if not self._is_message_in_changes(changes, message.get('id')):
+                        changes.append({
+                            'messageId': message.get('id'),
+                            'threadId': message.get('threadId'),
+                            'labelIds': message.get('labelIds', []),
+                            'change': 'added'
+                        })
+            
+            # Handle label changes
+            if 'labelsAdded' in record:
+                for label_added in record['labelsAdded']:
+                    message = label_added.get('message', {})
+                    message_id = message.get('id')
+                    change_item = self._get_or_create_change_item(changes, message_id, message)
+                    
+                    # Add new labels to the change item
+                    if 'labelsAdded' not in change_item:
+                        change_item['labelsAdded'] = []
+                    change_item['labelsAdded'].extend(label_added.get('labelIds', []))
+                    change_item['change'] = 'modified'
+            
+            # Handle label removals
+            if 'labelsRemoved' in record:
+                for label_removed in record['labelsRemoved']:
+                    message = label_removed.get('message', {})
+                    message_id = message.get('id')
+                    change_item = self._get_or_create_change_item(changes, message_id, message)
+                    
+                    # Add removed labels to the change item
+                    if 'labelsRemoved' not in change_item:
+                        change_item['labelsRemoved'] = []
+                    change_item['labelsRemoved'].extend(label_removed.get('labelIds', []))
+                    change_item['change'] = 'modified'
+        
+        return changes
+    
+    def _is_message_in_changes(self, changes: List[Dict], message_id: str) -> bool:
+        """Check if a message is already in the changes list"""
+        for change in changes:
+            if change.get('messageId') == message_id:
+                return True
+        return False
+    
+    def _get_or_create_change_item(self, changes: List[Dict], message_id: str, message: Dict) -> Dict:
+        """Get existing change item or create a new one"""
+        for change in changes:
+            if change.get('messageId') == message_id:
+                return change
+        
+        # Create new change item
+        new_change = {
+            'messageId': message_id,
+            'threadId': message.get('threadId'),
+            'labelIds': message.get('labelIds', []),
+            'change': 'modified'
+        }
+        changes.append(new_change)
+        return new_change
+    
+    def get_message(self, message_id: str, format: str = 'metadata') -> Dict:
+        """
+        Get a specific message by ID
+        
+        Args:
+            message_id: The ID of the message to retrieve
+            format: The format of the message (minimal, full, raw, metadata)
+            
+        Returns:
+            The message data
+        """
+        try:
+            message = self.service.users().messages().get(
+                userId='me', 
+                id=message_id, 
+                format=format
+            ).execute()
+            
+            return message
+        except HttpError as error:
+            print(f"Get message error: {error}")
+            raise
+    
+    def modify_message(self, message_id: str, add_labels: List[str] = None, 
+                       remove_labels: List[str] = None) -> Dict:
+        """
+        Modify the labels on a message
+        
+        Args:
+            message_id: The ID of the message to modify
+            add_labels: Labels to add to the message
+            remove_labels: Labels to remove from the message
+            
+        Returns:
+            The updated message
+        """
+        try:
+            body = {
+                'addLabelIds': add_labels or [],
+                'removeLabelIds': remove_labels or []
+            }
+            
+            result = self.service.users().messages().modify(
+                userId='me',
+                id=message_id,
+                body=body
+            ).execute()
+            
+            return result
+        except HttpError as error:
+            print(f"Modify message error: {error}")
+            raise
+    
+    def trash_message(self, message_id: str) -> Dict:
+        """
+        Move a message to trash
+        
+        Args:
+            message_id: The ID of the message to trash
+            
+        Returns:
+            The trashed message
+        """
+        try:
+            result = self.service.users().messages().trash(
+                userId='me',
+                id=message_id
+            ).execute()
+            
+            return result
+        except HttpError as error:
+            print(f"Trash message error: {error}")
+            raise 
