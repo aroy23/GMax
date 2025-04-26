@@ -489,6 +489,47 @@ if (window.location.hostname === 'mail.google.com') {
     z-index: 9999;
   `;
 
+  const retrainButton = document.createElement('button');
+  retrainButton.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" fill="#40e0d0"/>
+      </svg>
+      <span>Retrain</span>
+    </div>
+  `;
+  retrainButton.style.cssText = `
+    padding: 8px 16px;
+    background: rgba(64, 224, 208, 0.1);
+    color: #ffffff;
+    border: 1px solid rgba(64, 224, 208, 0.2);
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    font-size: 14px;
+    font-weight: 500;
+  `;
+
+  retrainButton.addEventListener('mouseover', () => {
+    retrainButton.style.background = 'rgba(64, 224, 208, 0.2)';
+    retrainButton.style.borderColor = 'rgba(64, 224, 208, 0.3)';
+    retrainButton.style.boxShadow = '0 0 12px rgba(64, 224, 208, 0.2)';
+  });
+
+  retrainButton.addEventListener('mouseout', () => {
+    retrainButton.style.background = 'rgba(64, 224, 208, 0.1)';
+    retrainButton.style.borderColor = 'rgba(64, 224, 208, 0.2)';
+    retrainButton.style.boxShadow = 'none';
+  });
+
+  retrainButton.addEventListener('click', () => {
+    // TODO: Implement retrain functionality
+    console.log('Retrain clicked');
+  });
+
   const smartSortButton = document.createElement('button');
   smartSortButton.innerHTML = `
     <div style="display: flex; align-items: center; gap: 8px;">
@@ -530,6 +571,7 @@ if (window.location.hostname === 'mail.google.com') {
     console.log('Smart Sort clicked');
   });
 
+  quickActionsPanel.appendChild(retrainButton);
   quickActionsPanel.appendChild(smartSortButton);
   document.body.appendChild(quickActionsPanel);
 
@@ -716,4 +758,118 @@ if (window.location.hostname === 'mail.google.com') {
     }
   `;
   document.head.appendChild(quickActionsStyle);
+
+  // Add phishing score indicator
+  const phishingScoreContainer = document.createElement('div');
+  phishingScoreContainer.id = 'phishing-score-container';
+  phishingScoreContainer.style.cssText = `
+    position: relative;
+    background: linear-gradient(145deg, #0a1929, #0d2b3e);
+    border: 1px solid rgba(64, 224, 208, 0.1);
+    padding: 12px 16px;
+    margin: 16px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  `;
+
+  const scoreIcon = document.createElement('div');
+  scoreIcon.style.cssText = `
+    width: 32px;
+    height: 32px;
+    background: rgba(64, 224, 208, 0.1);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `;
+  scoreIcon.innerHTML = `
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" fill="#40e0d0"/>
+    </svg>
+  `;
+
+  const scoreContent = document.createElement('div');
+  scoreContent.style.cssText = `
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  `;
+
+  const scoreTitle = document.createElement('div');
+  scoreTitle.style.cssText = `
+    color: #ffffff;
+    font-weight: 500;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  `;
+  scoreTitle.innerHTML = `
+    <span>Phishing Risk Assessment</span>
+    <div style="width: 6px; height: 6px; background: #40e0d0; border-radius: 50%; box-shadow: 0 0 8px #40e0d0;"></div>
+  `;
+
+  const scoreValue = document.createElement('div');
+  scoreValue.style.cssText = `
+    color: #40e0d0;
+    font-size: 24px;
+    font-weight: 600;
+  `;
+  scoreValue.textContent = '50%';
+
+  const scoreDescription = document.createElement('div');
+  scoreDescription.style.cssText = `
+    color: #a0a0a0;
+    font-size: 13px;
+  `;
+  scoreDescription.textContent = 'Moderate risk level detected';
+
+  scoreContent.appendChild(scoreTitle);
+  scoreContent.appendChild(scoreValue);
+  scoreContent.appendChild(scoreDescription);
+  phishingScoreContainer.appendChild(scoreIcon);
+  phishingScoreContainer.appendChild(scoreContent);
+
+  // Function to show phishing score
+  function showPhishingScore() {
+    const emailContent = document.querySelector('div.gA.gt.acV');
+    if (emailContent) {
+      emailContent.parentNode?.insertBefore(phishingScoreContainer, emailContent);
+    }
+  }
+
+  // Listen for email opens
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (mutation.addedNodes.length) {
+        const emailContent = document.querySelector('div.gA.gt.acV');
+        if (emailContent && !document.getElementById('phishing-score-container')) {
+          showPhishingScore();
+        }
+      }
+    });
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
+  // Add styles for phishing score
+  const phishingScoreStyle = document.createElement('style');
+  phishingScoreStyle.textContent = `
+    #phishing-score-container {
+      transition: all 0.3s ease;
+    }
+    
+    #phishing-score-container:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+  `;
+  document.head.appendChild(phishingScoreStyle);
 }
