@@ -86,38 +86,64 @@ class EmailProcessor:
         Returns:
             Processing result
         """
-        # Get the message metadata
-        message = self.gmail_service.get_message(message_id)
-        
-        # Extract headers
-        headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
-        
-        # For metadata format, we may not have the full content
-        # Just extract what's available or provide a placeholder
-        email_content = self._extract_email_content(message)
-        
-        # Print email details to console
-        self._print_email_details(headers, email_content)
-        
-        # Example: Check if message looks like spam (very simplistic)
-        is_spam = False
-        if 'Subject' in headers:
-            spam_keywords = ['viagra', 'lottery', 'winner', 'free money', 'investment opportunity']
-            if any(keyword in headers['Subject'].lower() for keyword in spam_keywords):
-                is_spam = True
-                # Apply SPAM label if detected
-                self.gmail_service.modify_message(message_id, add_labels=['SPAM'])
-        
-        return {
-            "messageId": message_id,
-            "threadId": message.get("threadId"),
-            "processed": True,
-            "timestamp": datetime.now().isoformat(),
-            "action": "spam_detected" if is_spam else "inbox_kept",
-            "from": headers.get("From", ""),
-            "subject": headers.get("Subject", ""),
-            "content_preview": email_content[:200] + "..." if len(email_content) > 200 else email_content
-        }
+        try:
+            # Try to get full message format first
+            try:
+                message = self.gmail_service.get_message(message_id, format="full")
+                message_format = "full"
+            except Exception as e:
+                # If full format fails, fall back to metadata
+                if "Metadata scope doesn't allow format FULL" in str(e):
+                    print(f"Falling back to metadata format due to permission restrictions: {e}")
+                    message = self.gmail_service.get_message(message_id, format="metadata")
+                    message_format = "metadata"
+                else:
+                    # Re-raise if it's not a permission issue
+                    raise
+            
+            # Extract headers
+            headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
+            
+            # Extract the email content (if available with our permissions)
+            if message_format == "full":
+                email_content = self._extract_email_content(message)
+            else:
+                # For metadata format, use snippet
+                email_content = message.get('snippet', '[Email content not available with current permissions]')
+            
+            # Print email details to console
+            self._print_email_details(headers, email_content)
+            
+            # Example: Check if message looks like spam (very simplistic)
+            is_spam = False
+            if 'Subject' in headers:
+                spam_keywords = ['viagra', 'lottery', 'winner', 'free money', 'investment opportunity']
+                if any(keyword in headers['Subject'].lower() for keyword in spam_keywords):
+                    is_spam = True
+                    # Apply SPAM label if detected
+                    self.gmail_service.modify_message(message_id, add_labels=['SPAM'])
+            
+            return {
+                "messageId": message_id,
+                "threadId": message.get("threadId"),
+                "processed": True,
+                "timestamp": datetime.now().isoformat(),
+                "action": "spam_detected" if is_spam else "inbox_kept",
+                "from": headers.get("From", ""),
+                "to": headers.get("To", ""),
+                "subject": headers.get("Subject", ""),
+                "content_preview": email_content[:200] + "..." if len(email_content) > 200 else email_content,
+                "full_content": email_content,
+                "format_used": message_format
+            }
+        except Exception as e:
+            print(f"Error processing message {message_id}: {e}")
+            return {
+                "messageId": message_id,
+                "processed": False,
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
     
     def _extract_email_content(self, message: Dict) -> str:
         """
@@ -131,10 +157,6 @@ class EmailProcessor:
         """
         content = ""
         payload = message.get('payload', {})
-        
-        # Check if we have a snippet (available in metadata format)
-        if 'snippet' in message:
-            return message['snippet']
         
         # Case 1: Simple message with body data
         if 'body' in payload and payload['body'].get('data'):
@@ -163,10 +185,26 @@ class EmailProcessor:
                             content += f"[HTML Content] {html_content[:500]}...\n"
                         except Exception as e:
                             print(f"Error decoding HTML part: {e}")
+            
+            # Try to find nested multipart content
+            if not content:
+                for part in payload['parts']:
+                    if 'parts' in part:
+                        for subpart in part['parts']:
+                            if subpart.get('mimeType') == 'text/plain' and subpart.get('body', {}).get('data'):
+                                try:
+                                    text_content = base64.urlsafe_b64decode(subpart['body']['data']).decode('utf-8', errors='replace')
+                                    content += text_content + "\n"
+                                except Exception as e:
+                                    print(f"Error decoding nested text part: {e}")
+        
+        # Case 3: Check for snippet as a fallback
+        if not content and 'snippet' in message:
+            content = message['snippet']
         
         # If we still don't have content, return a placeholder
         if not content:
-            return "[Email content not available in metadata format]"
+            return "[No email content could be extracted]"
             
         return content.strip()
     
@@ -210,15 +248,52 @@ class EmailProcessor:
         Returns:
             Processing result
         """
-        # In a real implementation, you might want to:
-        # 1. Check if important labels were added/removed
-        # 2. Reprocess message if it was moved to a different category
-        
-        return {
-            "messageId": message_id,
-            "processed": True,
-            "timestamp": datetime.now().isoformat(),
-            "action": "labels_updated",
-            "labelsAdded": labels_added,
-            "labelsRemoved": labels_removed
-        } 
+        try:
+            # Get the message to extract content and details
+            try:
+                message = self.gmail_service.get_message(message_id, format="full")
+                message_format = "full"
+                # Extract headers
+                headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
+                # Extract content
+                email_content = self._extract_email_content(message)
+            except Exception as e:
+                # If full format fails, fall back to metadata
+                if "Metadata scope doesn't allow format FULL" in str(e):
+                    print(f"Falling back to metadata format due to permission restrictions: {e}")
+                    message = self.gmail_service.get_message(message_id, format="metadata")
+                    message_format = "metadata"
+                    # Extract headers
+                    headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
+                    # For metadata format, use snippet
+                    email_content = message.get('snippet', '[Email content not available with current permissions]')
+                else:
+                    # Re-raise if it's not a permission issue
+                    raise
+                    
+            return {
+                "messageId": message_id,
+                "threadId": message.get("threadId"),
+                "processed": True,
+                "timestamp": datetime.now().isoformat(),
+                "action": "labels_updated",
+                "from": headers.get("From", ""),
+                "to": headers.get("To", ""),
+                "subject": headers.get("Subject", ""),
+                "labelsAdded": labels_added,
+                "labelsRemoved": labels_removed,
+                "content_preview": email_content[:200] + "..." if len(email_content) > 200 else email_content,
+                "full_content": email_content,
+                "format_used": message_format
+            }
+        except Exception as e:
+            print(f"Error processing modified message {message_id}: {e}")
+            return {
+                "messageId": message_id,
+                "processed": True,
+                "timestamp": datetime.now().isoformat(),
+                "action": "labels_updated",
+                "labelsAdded": labels_added,
+                "labelsRemoved": labels_removed,
+                "error": str(e)
+            } 

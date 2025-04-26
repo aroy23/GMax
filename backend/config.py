@@ -29,9 +29,7 @@ PUBSUB_SUBSCRIPTION = f"projects/{PROJECT_ID}/subscriptions/gmail-notifications-
 
 # Gmail API configuration
 GMAIL_SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/gmail.metadata"
+    "https://mail.google.com/"  # Full access to Gmail - this is the most permissive scope and includes all others
 ]
 
 # OAuth2 credentials

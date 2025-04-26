@@ -1,6 +1,7 @@
 import json
 import base64
 import os
+import asyncio
 from typing import Dict, Optional, List, Any
 from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks
 from fastapi.responses import RedirectResponse
@@ -14,7 +15,7 @@ import httpx
 import uuid
 from google.cloud import pubsub_v1
 
-from gmail_auth import start_oauth_flow, complete_oauth_flow
+from gmail_auth import start_oauth_flow, complete_oauth_flow, revoke_token
 from gmail_service import GmailService
 from pubsub_handler import PubSubHandler
 from supabase_db import SupabaseDB
@@ -22,12 +23,15 @@ from email_processor import EmailProcessor
 from watch_scheduler import WatchScheduler
 from services.pubsub_service import PubSubService
 from services.gmail_service import GmailService as AsyncGmailService
+from config import TOKEN_FILE
 
 # Load environment variables
 load_dotenv()
 
 # Get base URL from environment variable or use localhost default
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+# Get notification webhook URL from environment variable or use None
+NOTIFICATION_WEBHOOK_URL = os.getenv("NOTIFICATION_WEBHOOK_URL")
 
 # Configure logging
 logging.basicConfig(
@@ -311,29 +315,165 @@ def root():
     }
 
 @app.get("/auth/url")
-def get_auth_url(redirect_uri: str):
+def get_auth_url(redirect_uri: str, user_id: Optional[str] = None, force_consent: bool = True):
     """Get Gmail OAuth URL for authentication"""
     try:
-        auth_url = start_oauth_flow(redirect_uri)
+        logger.info(f"Generating auth URL with redirect_uri: {redirect_uri}, user_id: {user_id}, force_consent: {force_consent}")
+        
+        # Use user_id as state parameter to track through OAuth flow
+        auth_url = start_oauth_flow(
+            redirect_uri, 
+            state=user_id,
+            force_consent=force_consent
+        )
         return {"auth_url": auth_url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/auth/callback")
-def auth_callback(request: AuthCodeRequest):
+@app.get("/auth/callback")
+async def auth_callback(request: Request):
     """Handle OAuth callback with authorization code"""
     try:
-        token_data = complete_oauth_flow(
-            request.code, 
-            request.redirect_uri, 
-            request.user_id
-        )
+        # For GET requests, extract params from query string
+        if request.method == "GET":
+            params = dict(request.query_params)
+            code = params.get("code")
+            # Use the exact same redirect_uri that was used in the initial request
+            redirect_uri = "http://localhost:8000/auth/callback"
+            # Get user_id from state parameter
+            state = params.get("state")
+            user_id = state
+            
+            logger.info(f"Received OAuth callback GET with state: {state}")
+            
+            if not code:
+                logger.error("Missing authorization code in callback")
+                raise HTTPException(status_code=400, detail="Missing authorization code")
+            if not user_id:
+                logger.error("Missing user_id (state parameter) in callback")
+                raise HTTPException(status_code=400, detail="Missing user_id (state parameter)")
+        # For POST requests, use the existing structure
+        else:
+            data = await request.json()
+            code = data.get("code")
+            redirect_uri = data.get("redirect_uri")
+            user_id = data.get("user_id")
+            
+            logger.info(f"Received OAuth callback POST for user_id: {user_id}")
+            
+        logger.info(f"Processing OAuth callback with code: {code[:10] if code else 'None'}... and redirect_uri: {redirect_uri}")
         
-        # Store the token in the database
-        db.store_token(request.user_id, token_data)
-        
-        return {"authenticated": True, "user_id": request.user_id}
+        try:
+            # First, remove any existing token files for this user
+            token_file = f"{user_id}_token.json"
+            if os.path.exists(token_file):
+                try:
+                    os.remove(token_file)
+                    logger.info(f"Removed existing token file for {user_id}")
+                except Exception as e:
+                    logger.warning(f"Could not remove existing token file: {e}")
+            
+            # Complete the OAuth flow to get a new token
+            token_data = complete_oauth_flow(
+                code, 
+                redirect_uri, 
+                user_id
+            )
+            
+            # Extract the email from the token data (which is now added by the complete_oauth_flow function)
+            email = token_data.get('email', user_id)
+            
+            # Verify the token has the full access scope
+            scopes = token_data.get('scopes', [])
+            has_full_access = "https://mail.google.com/" in scopes
+            
+            if not has_full_access:
+                logger.warning(f"Token does not have full Gmail access. Scopes: {scopes}")
+                # We'll still proceed, but log a warning
+            
+            # Store the token in the database using the email as the user identifier
+            db.store_token(email, token_data)
+            logger.info(f"Successfully stored token for {email} in database")
+            
+            # For GET requests, redirect to a confirmation page
+            if request.method == "GET":
+                success_url = f"{BASE_URL}/?auth_success=true&user_id={email}"
+                logger.info(f"Auth successful, redirecting to: {success_url}")
+                return RedirectResponse(url=success_url)
+            
+            # For POST requests, return JSON
+            return {"authenticated": True, "user_id": email, "has_full_access": has_full_access}
+        except Exception as oauth_error:
+            logger.error(f"OAuth completion error: {str(oauth_error)}")
+            error_message = str(oauth_error)
+            
+            # Handle scope mismatch errors specially
+            if "Scope has changed" in error_message:
+                logger.warning("Scope mismatch detected. This may be due to inconsistent GMAIL_SCOPES configuration.")
+                logger.warning("Check config.py to ensure GMAIL_SCOPES match what's being used in the OAuth flow.")
+            
+            if request.method == "GET":
+                error_url = f"{BASE_URL}/?auth_error=true&error={error_message}"
+                return RedirectResponse(url=error_url)
+            raise HTTPException(status_code=500, detail=f"OAuth error: {error_message}")
     except Exception as e:
+        logger.error(f"Error in auth callback: {str(e)}")
+        if request.method == "GET":
+            return RedirectResponse(url=f"{BASE_URL}/?auth_error=true&error={str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/auth/reset")
+@app.get("/auth/reset")
+def reset_auth(user_id: str):
+    """Reset a user's authentication and force re-authentication with new scopes"""
+    try:
+        logger.info(f"Resetting authentication for user: {user_id}")
+        
+        # 1. Get current token from database
+        user_data = db.get_user_data(user_id)
+        if not user_data or 'token' not in user_data:
+            return {
+                "status": "warning", 
+                "message": f"No token found for {user_id}"
+            }
+            
+        token_data = user_data.get('token')
+        
+        # 2. Try to revoke token if we have an access token
+        if token_data and 'token' in token_data:
+            try:
+                revoke_result = revoke_token(token_data['token'])
+                logger.info(f"Token revocation result: {revoke_result}")
+            except Exception as e:
+                logger.error(f"Error revoking token: {e}")
+        
+        # 3. Delete token file if it exists
+        token_filename = f"{user_id}_{TOKEN_FILE}"
+        if os.path.exists(token_filename):
+            try:
+                os.remove(token_filename)
+                logger.info(f"Removed token file for {user_id}")
+            except Exception as e:
+                logger.error(f"Error removing token file: {e}")
+                
+        # 4. Clear token in database
+        try:
+            db.update_user_data(user_id, {'token': None})
+            logger.info(f"Cleared token in database for {user_id}")
+        except Exception as e:
+            logger.error(f"Error clearing token in database: {e}")
+        
+        # 5. Generate a new auth URL for the user
+        auth_url = start_oauth_flow("http://localhost:8000/auth/callback", state=user_id)
+        
+        return {
+            "status": "success",
+            "message": "Authentication reset successfully. Please re-authenticate with the new URL.",
+            "auth_url": auth_url
+        }
+    except Exception as e:
+        logger.error(f"Error resetting authentication: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/gmail/watch")
@@ -508,45 +648,160 @@ async def gmail_webhook(request: Request, background_tasks: BackgroundTasks):
 
 @app.post("/gmail/process-history")
 def process_history_endpoint(request: ProcessHistoryRequest):
-    """Process Gmail history for a user"""
+    """Process Gmail history manually with a history ID"""
+    try:
+        result = process_gmail_notification(request.user_id, request.history_id)
+        return {"status": "processed", "result": result}
+    except Exception as e:
+        logger.error(f"Error processing history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/email/message/{user_id}/{message_id}")
+def get_full_email_message(user_id: str, message_id: str):
+    """Get the full content of an email message
+    
+    Args:
+        user_id: The user ID (email address)
+        message_id: The Gmail message ID
+        
+    Returns:
+        Complete email message with full content
+    """
     try:
         # Get user data from database
-        user_data = db.get_user_data(request.user_id)
-        if not user_data or 'token' not in user_data:
-            raise HTTPException(
-                status_code=401, 
-                detail="User not authenticated"
-            )
-        
-        # Get the last history ID
-        last_history_id = user_data.get('last_history_id')
-        
-        # Process the notification
-        processor = EmailProcessor(request.user_id, user_data.get('token'))
-        result = processor.process_notification(request.history_id, last_history_id)
-        
-        # Update the last history ID if processing was successful
-        if result.get('status') in ['processed', 'initialized']:
-            db.update_history_id(request.user_id, result.get('historyId'))
+        user_data = db.get_user_data(user_id)
+        if not user_data:
+            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
             
-            # Log the processing event
-            db.log_history_event(
-                request.user_id,
-                result.get('historyId'),
-                f"history_processed_{result.get('status')}",
-                {
-                    "processedCount": result.get('processedCount', 0),
-                    "results": result.get('results', [])
-                }
-            )
+        if 'token' not in user_data:
+            raise HTTPException(status_code=401, detail=f"No auth token for user {user_id}")
         
-        return result
+        # Create the Gmail service
+        gmail_service = GmailService(user_id, user_data.get('token'))
+        
+        # Get the full message
+        try:
+            message = gmail_service.get_message(message_id, format="full")
+        except Exception as e:
+            # If full format fails, fall back to metadata
+            if "Metadata scope doesn't allow format FULL" in str(e):
+                logger.warning(f"Falling back to metadata format due to permission restrictions: {e}")
+                message = gmail_service.get_message(message_id, format="metadata")
+                
+                # Return with limited data
+                return {
+                    "messageId": message_id,
+                    "format": "metadata",
+                    "snippet": message.get("snippet", ""),
+                    "error": "Limited permissions. Only metadata available.",
+                    "headers": {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
+                }
+            else:
+                # Re-raise if it's not a permission issue
+                raise
+        
+        # Extract headers
+        headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
+        
+        # Create an EmailProcessor to use its content extraction logic
+        processor = EmailProcessor(user_id, user_data.get('token'))
+        
+        # Extract the full email content
+        email_content = processor._extract_email_content(message)
+        
+        # Return the full message details including complete content
+        return {
+            "messageId": message_id,
+            "threadId": message.get("threadId"),
+            "format": "full",
+            "headers": headers,
+            "from": headers.get("From", ""),
+            "to": headers.get("To", ""),
+            "subject": headers.get("Subject", ""),
+            "date": headers.get("Date", ""),
+            "content": email_content,
+            "snippet": message.get("snippet", "")
+        }
     except Exception as e:
+        logger.error(f"Error retrieving full email message: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/email/messages/{user_id}")
+def list_email_messages(user_id: str, max_results: int = 10, label: str = "INBOX"):
+    """List email messages for a user with their full content
+    
+    Args:
+        user_id: The user ID (email address)
+        max_results: Maximum number of messages to return
+        label: Label to filter messages by (default: INBOX)
+        
+    Returns:
+        List of email messages with full content
+    """
+    try:
+        # Get user data from database
+        user_data = db.get_user_data(user_id)
+        if not user_data:
+            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+            
+        if 'token' not in user_data:
+            raise HTTPException(status_code=401, detail=f"No auth token for user {user_id}")
+        
+        # Create the Gmail service
+        gmail_service = GmailService(user_id, user_data.get('token'))
+        
+        # List messages
+        messages_list = gmail_service.list_messages(max_results=max_results, label_ids=[label])
+        
+        # Create an EmailProcessor to use its content extraction logic
+        processor = EmailProcessor(user_id, user_data.get('token'))
+        
+        # Process each message to get full content
+        processed_messages = []
+        for msg_data in messages_list:
+            message_id = msg_data.get("id")
+            
+            # Get the full message with content
+            try:
+                # Get full message details
+                message = gmail_service.get_message(message_id, format="full")
+                # Extract headers
+                headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
+                # Extract content
+                email_content = processor._extract_email_content(message)
+                
+                processed_messages.append({
+                    "messageId": message_id,
+                    "threadId": message.get("threadId"),
+                    "format": "full",
+                    "headers": headers,
+                    "from": headers.get("From", ""),
+                    "to": headers.get("To", ""),
+                    "subject": headers.get("Subject", ""),
+                    "date": headers.get("Date", ""),
+                    "content": email_content,
+                    "snippet": message.get("snippet", "")
+                })
+            except Exception as e:
+                # If error occurs for this message, add with limited info
+                logger.error(f"Error processing message {message_id}: {e}")
+                processed_messages.append({
+                    "messageId": message_id,
+                    "error": str(e),
+                    "processed": False
+                })
+        
+        return {
+            "messages": processed_messages,
+            "count": len(processed_messages)
+        }
+    except Exception as e:
+        logger.error(f"Error listing email messages: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/admin/renew-watches")
 def renew_watches():
-    """Admin endpoint to manually renew all watches"""
+    """Manually trigger renewal of all Gmail watches"""
     # Check if PubSub is operational
     if not pubsub_handler or not pubsub_handler.is_operational:
         raise HTTPException(
@@ -728,6 +983,13 @@ def process_gmail_notification(email_address: str, history_id: str):
                     "results": result.get('results', [])
                 }
             )
+            
+            # Send notifications for any new messages
+            if result.get('status') == 'processed' and result.get('processedCount', 0) > 0:
+                for msg_result in result.get('results', []):
+                    if msg_result.get('processed') and msg_result.get('action') != 'spam_detected':
+                        # Send notification with full content
+                        send_email_notification(user_id, msg_result)
         else:
             logger.warning(f"Not updating last_history_id due to status: {result.get('status')}")
         
@@ -736,6 +998,50 @@ def process_gmail_notification(email_address: str, history_id: str):
         import traceback
         logger.error(f"Error processing Gmail notification: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
+
+def send_email_notification(user_id: str, message_data: Dict):
+    """
+    Send a notification about a new email with its full content
+    
+    Args:
+        user_id: The user ID (email address)
+        message_data: The processed message data
+    """
+    if not NOTIFICATION_WEBHOOK_URL:
+        logger.info("No notification webhook URL configured. Skipping notification.")
+        return
+        
+    try:
+        # Prepare notification data with full message content
+        notification_data = {
+            "type": "new_email",
+            "user_id": user_id,
+            "timestamp": message_data.get("timestamp"),
+            "message": {
+                "id": message_data.get("messageId"),
+                "thread_id": message_data.get("threadId"),
+                "from": message_data.get("from"),
+                "to": message_data.get("to", ""),
+                "subject": message_data.get("subject"),
+                "content": message_data.get("full_content", ""),  # Use full content
+                "preview": message_data.get("content_preview", "")
+            }
+        }
+        
+        # Use a synchronous request with a standard timeout
+        logger.info(f"Sending notification to webhook: {NOTIFICATION_WEBHOOK_URL}")
+        response = httpx.post(
+            NOTIFICATION_WEBHOOK_URL,
+            json=notification_data,
+            timeout=10.0
+        )
+        
+        if response.status_code < 200 or response.status_code >= 300:
+            logger.error(f"Failed to send notification: {response.status_code} {response.text}")
+        else:
+            logger.info(f"Notification sent successfully: {response.status_code}")
+    except Exception as e:
+        logger.error(f"Error sending email notification: {e}")
 
 @app.post("/test/pubsub")
 async def test_pubsub():

@@ -312,4 +312,35 @@ class GmailService:
             return result
         except HttpError as error:
             print(f"Trash message error: {error}")
+            raise
+    
+    def list_messages(self, max_results: int = 10, label_ids: Optional[List[str]] = None) -> List[Dict]:
+        """
+        List messages in the user's mailbox
+        
+        Args:
+            max_results: Maximum number of messages to return
+            label_ids: List of label IDs to filter by (e.g., ["INBOX"])
+            
+        Returns:
+            List of message metadata
+        """
+        try:
+            # Prepare the query parameters
+            query_params = {
+                'userId': 'me',
+                'maxResults': max_results
+            }
+            
+            # Add label filter if provided
+            if label_ids:
+                query_params['labelIds'] = label_ids
+                
+            # Get the messages list
+            response = self.service.users().messages().list(**query_params).execute()
+            
+            # Return the messages
+            return response.get('messages', [])
+        except HttpError as error:
+            print(f"List messages error: {error}")
             raise 
