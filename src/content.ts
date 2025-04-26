@@ -69,7 +69,37 @@ if (window.location.hostname === 'mail.google.com') {
     flex-direction: column;
     gap: 12px;
     background: linear-gradient(145deg, #0a1929, #0d2b3e);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(64, 224, 208, 0.2) transparent;
   `;
+
+  // Add scrollbar styles
+  const scrollbarStyle = document.createElement('style');
+  scrollbarStyle.textContent = `
+    #chat-messages::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    
+    #chat-messages::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    
+    #chat-messages::-webkit-scrollbar-thumb {
+      background-color: rgba(64, 224, 208, 0.2);
+      border-radius: 3px;
+      transition: all 0.2s;
+    }
+    
+    #chat-messages::-webkit-scrollbar-thumb:hover {
+      background-color: rgba(64, 224, 208, 0.3);
+    }
+    
+    #chat-messages::-webkit-scrollbar-corner {
+      background: transparent;
+    }
+  `;
+  document.head.appendChild(scrollbarStyle);
 
   // Create input container
   const inputContainer = document.createElement('div');
@@ -150,17 +180,22 @@ if (window.location.hostname === 'mail.google.com') {
   let xOffset = 0;
   let yOffset = 0;
 
-  header.addEventListener('mousedown', dragStart);
+  chatboxContainer.addEventListener('mousedown', dragStart);
   document.addEventListener('mousemove', drag);
   document.addEventListener('mouseup', dragEnd);
 
   function dragStart(e: MouseEvent) {
+    // Don't start drag if clicking on input or buttons
+    const target = e.target as HTMLElement;
+    if (target instanceof HTMLInputElement || 
+        target instanceof HTMLButtonElement ||
+        target.closest('button')) {
+      return;
+    }
+
     initialX = e.clientX - xOffset;
     initialY = e.clientY - yOffset;
-
-    if (e.target === header || header.contains(e.target as Node)) {
-      isDragging = true;
-    }
+    isDragging = true;
   }
 
   function drag(e: MouseEvent) {
@@ -592,6 +627,7 @@ if (window.location.hostname === 'mail.google.com') {
     margin: 8px 16px;
     border-radius: 12px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
   `;
 
   // Create header for AI actions panel
@@ -599,18 +635,27 @@ if (window.location.hostname === 'mail.google.com') {
   aiActionsHeader.style.cssText = `
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
     padding: 4px 0;
     color: #ffffff;
     font-size: 14px;
     font-weight: 500;
+    cursor: pointer;
   `;
   aiActionsHeader.innerHTML = `
-    <div style="width: 6px; height: 6px; background: #40e0d0; border-radius: 50%; box-shadow: 0 0 8px #40e0d0;"></div>
-    <span>AI Actions</span>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <div style="width: 6px; height: 6px; background: #40e0d0; border-radius: 50%; box-shadow: 0 0 8px #40e0d0;"></div>
+      <span>AI Actions</span>
+    </div>
+    <button id="toggle-ai-actions" style="background: none; border: none; color: #ffffff; cursor: pointer; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
   `;
 
-  // Create actions container
+  // Create actions container with initial collapsed state
   const actionsContainer = document.createElement('div');
   actionsContainer.id = 'ai-actions-container';
   actionsContainer.style.cssText = `
@@ -620,7 +665,70 @@ if (window.location.hostname === 'mail.google.com') {
     overflow-x: auto;
     padding: 4px 0;
     width: 100%;
+    transition: all 0.3s ease;
+    opacity: 1;
+    max-height: 200px;
   `;
+
+  // Assemble the AI actions panel
+  aiActionsPanel.appendChild(aiActionsHeader);
+  aiActionsPanel.appendChild(actionsContainer);
+
+  // Find the AO div and insert the panel before it
+  const aoDiv = document.querySelector('div.AO');
+  if (aoDiv) {
+    aoDiv.parentNode?.insertBefore(aiActionsPanel, aoDiv);
+    setupToggleFunctionality();
+  } else {
+    // If AO div not found, try to find it after a short delay (Gmail might still be loading)
+    setTimeout(() => {
+      const aoDiv = document.querySelector('div.AO');
+      if (aoDiv) {
+        aoDiv.parentNode?.insertBefore(aiActionsPanel, aoDiv);
+        setupToggleFunctionality();
+      } else {
+        console.error('Could not find AO div for AI actions panel placement');
+      }
+    }, 1000);
+  }
+
+  // Function to setup toggle functionality
+  function setupToggleFunctionality() {
+    const toggleButton = document.getElementById('toggle-ai-actions');
+    if (toggleButton) {
+      toggleButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isCollapsed = actionsContainer.style.maxHeight === '0px';
+        
+        if (isCollapsed) {
+          actionsContainer.style.maxHeight = '200px';
+          actionsContainer.style.opacity = '1';
+          actionsContainer.style.padding = '4px 0';
+          toggleButton.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          `;
+        } else {
+          actionsContainer.style.maxHeight = '0px';
+          actionsContainer.style.opacity = '0';
+          actionsContainer.style.padding = '0';
+          toggleButton.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M7 14l5-5 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          `;
+        }
+      });
+
+      // Add click handler to header for toggling
+      aiActionsHeader.addEventListener('click', (e) => {
+        if (e.target !== toggleButton) {
+          toggleButton.click();
+        }
+      });
+    }
+  }
 
   // Function to add a new action
   function addAIAction(action: string, timestamp: Date) {
@@ -654,25 +762,157 @@ if (window.location.hostname === 'mail.google.com') {
     }
   }
 
-  // Assemble the AI actions panel
-  aiActionsPanel.appendChild(aiActionsHeader);
-  aiActionsPanel.appendChild(actionsContainer);
+  // Example usage:
+  addAIAction('Analyzed email content for sentiment', new Date());
+  addAIAction('Generated response draft', new Date());
+  addAIAction('Suggested email categorization', new Date());
 
-  // Find the AO div and insert the panel before it
-  const aoDiv = document.querySelector('div.AO');
-  if (aoDiv) {
-    aoDiv.parentNode?.insertBefore(aiActionsPanel, aoDiv);
-  } else {
-    // If AO div not found, try to find it after a short delay (Gmail might still be loading)
-    setTimeout(() => {
-      const aoDiv = document.querySelector('div.AO');
-      if (aoDiv) {
-        aoDiv.parentNode?.insertBefore(aiActionsPanel, aoDiv);
-      } else {
-        console.error('Could not find AO div for AI actions panel placement');
-      }
-    }, 1000);
+  // Add styles for quick actions panel
+  const quickActionsStyle = document.createElement('style');
+  quickActionsStyle.textContent = `
+    #quick-actions-panel {
+      min-width: 120px;
+    }
+    
+    #quick-actions-panel button {
+      white-space: nowrap;
+    }
+    
+    #quick-actions-panel button:hover {
+      transform: translateY(-1px);
+    }
+  `;
+  document.head.appendChild(quickActionsStyle);
+
+  // Add phishing score indicator
+  const phishingScoreContainer = document.createElement('div');
+  phishingScoreContainer.id = 'phishing-score-container';
+  phishingScoreContainer.style.cssText = `
+    position: relative;
+    background: linear-gradient(145deg, #0a1929, #0d2b3e);
+    border: 1px solid rgba(64, 224, 208, 0.1);
+    padding: 12px 16px;
+    margin: 16px 0px 0px 0px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    width: fit-content;
+    max-width: 300px;
+  `;
+
+  const topRow = document.createElement('div');
+  topRow.style.cssText = `
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  `;
+
+  const scoreIcon = document.createElement('div');
+  scoreIcon.style.cssText = `
+    width: 20px;
+    height: 20px;
+    background: rgba(64, 224, 208, 0.1);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `;
+  scoreIcon.innerHTML = `
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" fill="#40e0d0"/>
+    </svg>
+  `;
+
+  const scoreTitle = document.createElement('div');
+  scoreTitle.style.cssText = `
+    color: #ffffff;
+    font-weight: 500;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  `;
+  scoreTitle.innerHTML = `
+    <span>Phishing Risk Assessment</span>
+    <div style="width: 6px; height: 6px; background: #40e0d0; border-radius: 50%; box-shadow: 0 0 8px #40e0d0;"></div>
+  `;
+
+  const bottomRow = document.createElement('div');
+  bottomRow.style.cssText = `
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  `;
+
+  const scoreValue = document.createElement('div');
+  scoreValue.style.cssText = `
+    color: #40e0d0;
+    font-size: 20px;
+    font-weight: 600;
+  `;
+  scoreValue.textContent = '50%';
+
+  const scoreDescription = document.createElement('div');
+  scoreDescription.style.cssText = `
+    color: #a0a0a0;
+    font-size: 13px;
+  `;
+  scoreDescription.textContent = 'Moderate risk level detected';
+
+  topRow.appendChild(scoreIcon);
+  topRow.appendChild(scoreTitle);
+  bottomRow.appendChild(scoreValue);
+  bottomRow.appendChild(scoreDescription);
+  phishingScoreContainer.appendChild(topRow);
+  phishingScoreContainer.appendChild(bottomRow);
+
+  // Function to show phishing score
+  function showPhishingScore() {
+    const emailContent = document.querySelector('div.aHU.hx');
+    if (emailContent) {
+      // Create a wrapper div for better positioning
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = `
+        display: flex;
+        justify-content: start;
+        width: 100%;
+        padding-left: 72px;
+      `;
+      wrapper.appendChild(phishingScoreContainer);
+      emailContent.parentNode?.insertBefore(wrapper, emailContent);
+    }
   }
+
+  // Listen for email opens
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (mutation.addedNodes.length) {
+        const emailContent = document.querySelector('div.gA.gt.acV');
+        if (emailContent && !document.getElementById('phishing-score-container')) {
+          showPhishingScore();
+        }
+      }
+    });
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
+  // Add styles for phishing score
+  const phishingScoreStyle = document.createElement('style');
+  phishingScoreStyle.textContent = `
+    #phishing-score-container {
+      transition: all 0.3s ease;
+    }
+    
+    #phishing-score-container:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+  `;
+  document.head.appendChild(phishingScoreStyle);
 
   // Add styles for AI actions panel
   const aiActionsStyle = document.createElement('style');
@@ -711,6 +951,7 @@ if (window.location.hostname === 'mail.google.com') {
     #ai-actions-container {
       scrollbar-width: thin;
       scrollbar-color: rgba(64, 224, 208, 0.2) transparent;
+      overflow: hidden;
     }
     
     #ai-actions-container::-webkit-scrollbar {
@@ -734,142 +975,10 @@ if (window.location.hostname === 'mail.google.com') {
       background: rgba(64, 224, 208, 0.15);
       transform: translateY(-2px);
     }
+
+    #toggle-ai-actions:hover {
+      background: rgba(64, 224, 208, 0.1);
+    }
   `;
   document.head.appendChild(aiActionsStyle);
-
-  // Example usage:
-  addAIAction('Analyzed email content for sentiment', new Date());
-  addAIAction('Generated response draft', new Date());
-  addAIAction('Suggested email categorization', new Date());
-
-  // Add styles for quick actions panel
-  const quickActionsStyle = document.createElement('style');
-  quickActionsStyle.textContent = `
-    #quick-actions-panel {
-      min-width: 120px;
-    }
-    
-    #quick-actions-panel button {
-      white-space: nowrap;
-    }
-    
-    #quick-actions-panel button:hover {
-      transform: translateY(-1px);
-    }
-  `;
-  document.head.appendChild(quickActionsStyle);
-
-  // Add phishing score indicator
-  const phishingScoreContainer = document.createElement('div');
-  phishingScoreContainer.id = 'phishing-score-container';
-  phishingScoreContainer.style.cssText = `
-    position: relative;
-    background: linear-gradient(145deg, #0a1929, #0d2b3e);
-    border: 1px solid rgba(64, 224, 208, 0.1);
-    padding: 12px 16px;
-    margin: 16px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  `;
-
-  const scoreIcon = document.createElement('div');
-  scoreIcon.style.cssText = `
-    width: 32px;
-    height: 32px;
-    background: rgba(64, 224, 208, 0.1);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  `;
-  scoreIcon.innerHTML = `
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" fill="#40e0d0"/>
-    </svg>
-  `;
-
-  const scoreContent = document.createElement('div');
-  scoreContent.style.cssText = `
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  `;
-
-  const scoreTitle = document.createElement('div');
-  scoreTitle.style.cssText = `
-    color: #ffffff;
-    font-weight: 500;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  `;
-  scoreTitle.innerHTML = `
-    <span>Phishing Risk Assessment</span>
-    <div style="width: 6px; height: 6px; background: #40e0d0; border-radius: 50%; box-shadow: 0 0 8px #40e0d0;"></div>
-  `;
-
-  const scoreValue = document.createElement('div');
-  scoreValue.style.cssText = `
-    color: #40e0d0;
-    font-size: 24px;
-    font-weight: 600;
-  `;
-  scoreValue.textContent = '50%';
-
-  const scoreDescription = document.createElement('div');
-  scoreDescription.style.cssText = `
-    color: #a0a0a0;
-    font-size: 13px;
-  `;
-  scoreDescription.textContent = 'Moderate risk level detected';
-
-  scoreContent.appendChild(scoreTitle);
-  scoreContent.appendChild(scoreValue);
-  scoreContent.appendChild(scoreDescription);
-  phishingScoreContainer.appendChild(scoreIcon);
-  phishingScoreContainer.appendChild(scoreContent);
-
-  // Function to show phishing score
-  function showPhishingScore() {
-    const emailContent = document.querySelector('div.gA.gt.acV');
-    if (emailContent) {
-      emailContent.parentNode?.insertBefore(phishingScoreContainer, emailContent);
-    }
-  }
-
-  // Listen for email opens
-  const observer = new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-      if (mutation.addedNodes.length) {
-        const emailContent = document.querySelector('div.gA.gt.acV');
-        if (emailContent && !document.getElementById('phishing-score-container')) {
-          showPhishingScore();
-        }
-      }
-    });
-  });
-
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
-
-  // Add styles for phishing score
-  const phishingScoreStyle = document.createElement('style');
-  phishingScoreStyle.textContent = `
-    #phishing-score-container {
-      transition: all 0.3s ease;
-    }
-    
-    #phishing-score-container:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    }
-  `;
-  document.head.appendChild(phishingScoreStyle);
 }
