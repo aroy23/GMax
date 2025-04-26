@@ -10,6 +10,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from email.message import EmailMessage
+from email.mime.text import MIMEText
 import google.auth
 import google.generativeai as genai
 
@@ -85,37 +86,129 @@ def send():
     try:
         service = build("gmail", "v1", credentials=creds)
 
+        profile = service.users().getProfile(userId="me").execute()  
+        user_email = profile["emailAddress"]
+
         message = EmailMessage()
 
-        message.set_content("This is automated draft mail")
+        user_data = db.get_user_data(user_email)
+        persona = user_data.get("persona") if user_data else None
 
-        message["To"] = "fermatjw@gmail.com"
-        message["From"] = "raynishant1@gmail.com"
-        message["Subject"] = "Automated draft"
+        if persona:
+            original_content = "Hello!\n\nMy name is Bob Dylan."
+            message_content = model.generate_content(
+                "Give me a plain string response to this email below:\n\n" + original_content + '\n\nUse this as the persona of the responder and act as them fully:\n\n' + persona
+            )
+        
+            message.set_content(message_content.text)
+            message["To"] = "fermatjw@gmail.com"
+            message["From"] = user_email
+            message["Subject"] = "Automated draft"
 
-        # encoded message
-        encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+            # encoded message
+            encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
 
-        create_message = {"raw": encoded_message}
-        # pylint: disable=E1101
-        send_message = (
-            service.users()
-            .messages()
-            .send(userId="me", body=create_message)
-            .execute()
-        )
+            create_message = {"raw": encoded_message}
+            send_message = (
+                service.users()
+                .messages()
+                .send(userId="me", body=create_message)
+                .execute()
+            )
 
-        return {"Message id": send_message["id"]}
+            return {"Message id": send_message["id"]}
 
     except HttpError as error:
         print(f"An error occurred: {error}")
         send_message = None
         return {"Status": "Failed!"}
-    
+
+def fetch_one_message(service, message_id: str) -> dict:
+    msg = service.users().messages().get(
+        userId="me",
+        id=message_id,
+        format="full"
+    ).execute()
+    return msg
+
 def gmail_body_to_text(data: str) -> str:
     b64 = data.replace("-", "+").replace("_", "/")
     b64 += "=" * ((4 - len(b64) % 4) % 4)
     return base64.b64decode(b64).decode("utf-8", errors="replace")
+
+@app.get("/reply") # /reply?original_email_id=some_id
+def reply(original_email_id: str):
+    creds = None
+    if os.path.exists("token.json"):
+        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    if not creds or not creds.valid:
+        creds = auth()
+
+    try:
+        service = build("gmail", "v1", credentials=creds)
+
+        profile = service.users().getProfile(userId="me").execute()  
+        user_email = profile["emailAddress"]
+
+        user_data = db.get_user_data(user_email)
+        persona = user_data.get("persona") if user_data else None
+
+        if persona:
+            # original_content = "Hello!\n\nMy name is Bob Dylan."
+            original_email = fetch_one_message(service, original_email_id)
+            payload = original_email["payload"]
+            if payload.get("body", {}).get("data"):
+                original_body = gmail_body_to_text(payload["body"]["data"])
+            else:
+                original_body = ""
+                for part in payload.get("parts", []):
+                    if part["mimeType"] == "text/plain" and part.get("body", {}).get("data"):
+                        original_body = gmail_body_to_text(part["body"]["data"])
+            
+            sent_from = 'Unknown'
+            subject = 'No Subject'
+            message_id_header = ''
+            thread_id = original_email["threadId"]
+            
+            for header in payload["headers"]:
+                if header["name"] == 'From':
+                    sent_from = header["value"]
+                elif header["name"] == 'Subject':
+                    subject = header["value"]
+                elif header["name"] == 'Message-ID':
+                    message_id_header = header["value"]
+
+            email = f'\nSTART OF EMAIL\nFrom: {sent_from}\nSubject: {subject}\nBody:\n{original_body}\n'
+
+            message_content = model.generate_content(
+                "Taking into account the sender (and their email address) and subject and body, give me a plain string response to this email below:\n\n" + email + '\n\nUse this as the persona of the responder and act as them fully:\n\n' + persona
+            )
+
+            if not subject.lower().startswith("re:"):
+                subject = "Re: " + subject
+            
+            mime = MIMEText(message_content.text)
+            mime["To"] = sent_from
+            mime["Subject"] = subject
+            mime["In-Reply-To"] = message_id_header
+            mime["References"] = message_id_header
+
+            encoded_message = base64.urlsafe_b64encode(mime.as_bytes()).decode()
+
+            create_message = {"raw": encoded_message, "threadId": thread_id}
+            send_message = (
+                service.users()
+                .messages()
+                .send(userId="me", body=create_message)
+                .execute()
+            )
+
+            return {"Message id": send_message["id"]}
+
+    except HttpError as error:
+        print(f"An error occurred: {error}")
+        send_message = None
+        return {"Status": "Failed!"}
 
 @app.get("/index")
 def index():
@@ -141,7 +234,6 @@ def index():
             response = request.execute()
             ids = response.get("messages", [])
             for msg_meta in ids:
-                # fetch full message body (or you can use 'metadata'/'minimal')
                 msg = service.users().messages().get(
                     userId="me",
                     id=msg_meta["id"],
@@ -181,7 +273,7 @@ def index():
         )
         
         persona = persona_response.text
-        updated = db.update_user_data(user_email, { "persona": persona })
+        db.update_user_data(user_email, { "persona": persona })
 
         return {"Status": "Success!"}
     
