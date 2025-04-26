@@ -20,6 +20,8 @@ class PubSubService:
         Args:
             credentials_path: Optional path to service account credentials file
         """
+
+        print("HELLO NISHAAAAAANT!!!!!!!!!!!!!!!")
         self.is_operational = True
         self.project_id = PROJECT_ID
         self.topic_name = PUBSUB_TOPIC.split('/')[-1]

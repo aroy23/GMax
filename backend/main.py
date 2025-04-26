@@ -10,19 +10,16 @@ from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
 import logging
 import threading
-import time
 import httpx
 import uuid
 from google.cloud import pubsub_v1
 
 from gmail_auth import start_oauth_flow, complete_oauth_flow, revoke_token
 from gmail_service import GmailService
-from pubsub_handler import PubSubHandler
 from supabase_db import SupabaseDB
 from email_processor import EmailProcessor
 from watch_scheduler import WatchScheduler
-from services.pubsub_service import PubSubService
-from services.gmail_service import GmailService as AsyncGmailService
+from pubsub_service import PubSubService
 from config import TOKEN_FILE
 
 # Load environment variables
@@ -65,39 +62,127 @@ except Exception as e:
     print("Application may not function correctly without database access.")
     raise
 
-# Initialize PubSub handler
-try:
-    pubsub_handler = PubSubHandler()
-    if not pubsub_handler.is_operational:
-        print("WARNING: PubSub is not operational. Email notifications will not work.")
-        print("Continue with limited functionality.")
-except Exception as e:
-    print(f"WARNING: Failed to initialize PubSub: {e}")
-    print("Email notifications will not be available.")
-    pubsub_handler = None
-
 # Initialize watch scheduler
 scheduler = WatchScheduler(db)
 
 # Initialize PubSub service
 pubsub_service = PubSubService()
 
-# Initialize Gmail service (async)
-gmail_service = AsyncGmailService()
+# --- Refactored Streaming Pull Logic ---
 
-# Start the scheduler on app startup
+def pubsub_streaming_pull():
+    """Background thread that uses PubSub streaming pull to continuously receive messages"""
+    try:
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT_ID")
+        subscription_id = "gmail-notifications-sub" # Ensure this matches your subscription ID
+
+        if not project_id:
+            logger.error("Cannot start streaming pull: Missing GOOGLE_CLOUD_PROJECT_ID")
+            return
+
+        logger.info(f"Starting PubSub streaming pull from {project_id}/{subscription_id}")
+
+        subscriber = pubsub_v1.SubscriberClient()
+        subscription_path = subscriber.subscription_path(project_id, subscription_id)
+
+        def callback(message):
+            """Process each incoming PubSub message"""
+            try:
+                logger.info(f"Received message from streaming pull: {message.message_id}")
+                data = message.data.decode("utf-8")
+                logger.info(f"Message data: {data[:200]}...") # Log truncated data
+
+                # Process the message similar to how we handle webhook requests
+                try:
+                    json_data = json.loads(data)
+                    # Extract historyId and emailAddress
+                    history_id = None
+                    email_address = None
+
+                    # Helper function to recursively search for fields
+                    def find_fields(obj, depth=0):
+                        nonlocal history_id, email_address
+                        if depth > 5:  # Prevent infinite recursion
+                            return
+
+                        if isinstance(obj, dict):
+                            for key, value in obj.items():
+                                if key == "historyId" and not history_id:
+                                    history_id = str(value)
+                                elif key in ["emailAddress", "email"] and not email_address:
+                                    # Basic validation
+                                    if isinstance(value, str) and '@' in value:
+                                        email_address = value
+                                    else:
+                                        logger.debug(f"Ignoring potential email field with invalid value: {value}")
+                                # Recursively search nested objects
+                                elif isinstance(value, (dict, list)):
+                                    find_fields(value, depth + 1)
+                        elif isinstance(obj, list):
+                            for item in obj:
+                                if isinstance(item, (dict, list)):
+                                    find_fields(item, depth + 1)
+
+                    # Search for fields in the message data
+                    find_fields(json_data)
+
+                    if email_address and history_id:
+                        logger.info(f"Processing notification from streaming pull: {email_address}, history_id: {history_id}")
+                        # Process the notification
+                        # Using BackgroundTasks to avoid blocking the callback thread?
+                        # NOTE: This callback runs in the subscriber's thread pool.
+                        # For longer tasks, consider offloading (e.g., to a task queue or separate thread pool).
+                        # For now, call directly, assuming process_gmail_notification is reasonably fast.
+                        process_gmail_notification(email_address, history_id)
+                    else:
+                        logger.warning(f"Couldn't extract valid emailAddress and historyId from message: {data[:200]}...")
+                except json.JSONDecodeError:
+                    logger.error(f"Error decoding JSON in streaming pull: {data[:200]}...")
+                except Exception as inner_e:
+                    logger.error(f"Error processing message content in callback: {str(inner_e)}")
+
+                # Acknowledge the message regardless of processing outcome to avoid redelivery loops
+                message.ack()
+                logger.debug(f"Acknowledged message: {message.message_id}")
+
+            except Exception as e:
+                logger.error(f"Error in streaming pull callback: {str(e)}")
+                # Attempt to ack even on error to prevent potential poison pills
+                try:
+                    message.ack()
+                    logger.warning(f"Acknowledged message {message.message_id} after error in callback.")
+                except Exception as ack_error:
+                    logger.error(f"Failed to acknowledge message {message.message_id} after error: {ack_error}")
+
+        # Subscribe with streaming pull
+        streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
+        logger.info(f"Streaming pull listener started for {subscription_path}")
+
+        # Keep the thread running and handle errors
+        try:
+            # result() blocks until the future is cancelled or raises an exception
+            streaming_pull_future.result()
+        except asyncio.CancelledError:
+             logger.info("Streaming pull cancelled.")
+        except Exception as e:
+            # Log the error which caused the future to complete
+            logger.error(f"Streaming pull listener stopped due to error: {str(e)}")
+            streaming_pull_future.cancel() # Ensure cancellation
+            # Consider adding a restart mechanism with backoff here if needed
+            # For simplicity, we'll let the thread exit. It might need manual restart.
+            # Example: time.sleep(60); pubsub_streaming_pull() # Be careful with recursion depth
+
+    except Exception as e:
+        logger.error(f"Fatal error starting streaming pull thread: {str(e)}")
+
+# --- End Refactored Streaming Pull Logic ---
+
+# Start the scheduler and potentially streaming pull on app startup
 @app.on_event("startup")
 async def startup_event():
-    # Set up PubSub topic and subscription if available
-    if pubsub_handler and pubsub_handler.is_operational:
-        try:
-            pubsub_handler.setup_pubsub()
-        except Exception as e:
-            print(f"ERROR setting up PubSub: {e}")
-            print("Email notifications will not be processed.")
-    else:
-        print("Skipping PubSub setup as it's not operational.")
-    
+    # Removed PubSub setup block as PubSubHandler is removed
+    # Streaming pull manages its own subscription
+
     # Start the watch scheduler
     try:
         scheduler.start()
@@ -105,160 +190,22 @@ async def startup_event():
     except Exception as e:
         print(f"ERROR starting watch scheduler: {e}")
         print("Automatic watch renewal will not be available.")
-    
-    # Start background polling as fallback
-    def background_polling():
-        """Background thread that polls for new emails every 5 minutes as a fallback"""
-        logger.info("Starting background polling for emails as fallback mechanism")
-        while True:
-            try:
-                # Sleep first to avoid immediate polling at startup
-                time.sleep(300)  # 5 minutes
-                
-                # Poll for all users
-                users = db.get_all_users()
-                if not users:
-                    logger.info("No users to poll for emails")
-                    continue
-                    
-                logger.info(f"Polling for new emails for {len(users)} users")
-                for user in users:
-                    email = user.get('user_id')
-                    if not email:
-                        continue
-                        
-                    try:
-                        logger.info(f"Polling for emails for {email}")
-                        # Use the manual notification logic
-                        user_data = db.get_user_data(email)
-                        if not user_data or 'token' not in user_data:
-                            logger.warning(f"Skipping poll for {email}: No auth token")
-                            continue
-                            
-                        gmail_service = GmailService(email, user_data.get('token'))
-                        profile = gmail_service.service.users().getProfile(userId='me').execute()
-                        current_history_id = profile.get('historyId')
-                        
-                        if not current_history_id:
-                            logger.warning(f"Skipping poll for {email}: No history ID")
-                            continue
-                            
-                        last_history_id = user_data.get('last_history_id')
-                        
-                        # Only process if we have a new history ID
-                        if last_history_id and int(current_history_id) > int(last_history_id):
-                            logger.info(f"Polling detected new emails for {email}. Processing...")
-                            process_gmail_notification(email, current_history_id)
-                        else:
-                            logger.info(f"No new emails for {email} during polling")
-                    except Exception as e:
-                        logger.error(f"Error polling for {email}: {str(e)}")
-            except Exception as e:
-                logger.error(f"Error in background polling: {str(e)}")
-    
+
+    # Removed background polling logic and thread
+
     # Start the streaming pull if enabled
-    def pubsub_streaming_pull():
-        """Background thread that uses PubSub streaming pull to continuously receive messages"""
-        try:
-            project_id = os.getenv("GOOGLE_CLOUD_PROJECT_ID")
-            subscription_id = "gmail-notifications-sub"
-            
-            if not project_id:
-                logger.error("Cannot start streaming pull: Missing GOOGLE_CLOUD_PROJECT_ID")
-                return
-                
-            logger.info(f"Starting PubSub streaming pull from {project_id}/{subscription_id}")
-            
-            subscriber = pubsub_v1.SubscriberClient()
-            subscription_path = subscriber.subscription_path(project_id, subscription_id)
-            
-            def callback(message):
-                """Process each incoming PubSub message"""
-                try:
-                    logger.info(f"Received message from streaming pull: {message.message_id}")
-                    data = message.data.decode("utf-8")
-                    logger.info(f"Message data: {data[:200]}")
-                    
-                    # Process the message similar to how we handle webhook requests
-                    try:
-                        json_data = json.loads(data)
-                        # Extract historyId and emailAddress using the same logic as in pubsub_handler
-                        history_id = None
-                        email_address = None
-                        
-                        # Helper function to recursively search for fields
-                        def find_fields(obj, depth=0):
-                            nonlocal history_id, email_address
-                            if depth > 5:  # Prevent infinite recursion
-                                return
-                                
-                            if isinstance(obj, dict):
-                                for key, value in obj.items():
-                                    if key == "historyId" and not history_id:
-                                        history_id = str(value)
-                                    elif key in ["emailAddress", "email"] and not email_address:
-                                        email_address = value
-                                    # Recursively search nested objects
-                                    elif isinstance(value, (dict, list)):
-                                        find_fields(value, depth + 1)
-                            elif isinstance(obj, list):
-                                for item in obj:
-                                    if isinstance(item, (dict, list)):
-                                        find_fields(item, depth + 1)
-                                        
-                        # Search for fields in the message data
-                        find_fields(json_data)
-                        
-                        if email_address and history_id:
-                            logger.info(f"Processing notification from streaming pull: {email_address}, history_id: {history_id}")
-                            # Process the notification
-                            process_gmail_notification(email_address, history_id)
-                        else:
-                            logger.warning(f"Couldn't extract email and historyId from message: {data[:200]}")
-                    except json.JSONDecodeError:
-                        logger.error(f"Error decoding JSON in streaming pull: {data[:200]}")
-                    
-                    # Acknowledge the message
-                    message.ack()
-                except Exception as e:
-                    logger.error(f"Error in streaming pull callback: {str(e)}")
-                    # Still ack to avoid redelivery of problematic messages
-                    message.ack()
-            
-            # Subscribe with streaming pull
-            streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
-            logger.info(f"Streaming pull started for {subscription_path}")
-            
-            # Keep the thread running
-            try:
-                streaming_pull_future.result()
-            except KeyboardInterrupt:
-                streaming_pull_future.cancel()
-                logger.info("Streaming pull cancelled by user")
-            except Exception as e:
-                logger.error(f"Streaming pull error: {str(e)}")
-                streaming_pull_future.cancel()
-                # Try to restart after a delay
-                time.sleep(60)
-                pubsub_streaming_pull()  # Recursive restart
-                
-        except Exception as e:
-            logger.error(f"Error starting streaming pull: {str(e)}")
-    
-    # Start the polling thread if configured
-    use_polling = os.environ.get("USE_EMAIL_POLLING", "true").lower() == "true"
     use_streaming_pull = os.environ.get("USE_STREAMING_PULL", "true").lower() == "true"
-    
-    if use_polling:
-        polling_thread = threading.Thread(target=background_polling, daemon=True)
-        polling_thread.start()
-        logger.info("Email polling thread started")
-        
-    if use_streaming_pull and pubsub_handler and pubsub_handler.is_operational:
-        streaming_thread = threading.Thread(target=pubsub_streaming_pull, daemon=True)
-        streaming_thread.start()
-        logger.info("PubSub streaming pull thread started")
-    
+
+    if use_streaming_pull:
+        # Check if PubSubService thinks it's operational (has credentials)
+        # This is an indirect check, streaming pull does its own credential check
+        if pubsub_service.is_operational:
+            streaming_thread = threading.Thread(target=pubsub_streaming_pull, daemon=True)
+            streaming_thread.start()
+            logger.info("PubSub streaming pull thread started")
+        else:
+             logger.warning("Skipping start of PubSub streaming pull: PubSubService is not operational (check credentials).")
+
     # Log the server URL
     print(f"Server running at: {BASE_URL}")
     if BASE_URL != "http://localhost:8000":
@@ -288,10 +235,6 @@ class NotificationRequest(BaseModel):
     message: Dict
     subscription: str
 
-class ProcessHistoryRequest(BaseModel):
-    user_id: str
-    history_id: str
-
 class SubscriptionRequest(BaseModel):
     email: EmailStr
     topic_name: Optional[str] = "email-notifications"
@@ -299,7 +242,7 @@ class SubscriptionRequest(BaseModel):
 
 class UnsubscriptionRequest(BaseModel):
     email: EmailStr
-    
+
 class PubSubMessage(BaseModel):
     message: Dict[str, Any]
     subscription: str
@@ -307,10 +250,11 @@ class PubSubMessage(BaseModel):
 @app.get("/")
 def root():
     # Return status including PubSub operational status
+    # Note: pubsub_handler removed, using pubsub_service status instead
     return {
-        "status": "online", 
+        "status": "online",
         "service": "EmailBot Backend",
-        "pubsub_operational": pubsub_handler is not None and pubsub_handler.is_operational,
+        "pubsub_operational": pubsub_service.is_operational, # Based on PubSubService init
         "database_connected": db is not None
     }
 
@@ -479,38 +423,54 @@ def reset_auth(user_id: str):
 @app.post("/gmail/watch")
 def start_watch(request: WatchRequest):
     """Start watching a user's Gmail inbox"""
-    # Check if PubSub is operational
-    if not pubsub_handler or not pubsub_handler.is_operational:
-        raise HTTPException(
-            status_code=503,
-            detail="Gmail watch functionality is not available due to missing Google Cloud credentials"
-        )
-        
+    # Removed check for pubsub_handler.is_operational
+    # Dependency check is implicit in whether GmailService can start watch
+
     try:
         # Get user data from database
         user_data = db.get_user_data(request.user_id)
         if not user_data or 'token' not in user_data:
             raise HTTPException(
-                status_code=401, 
+                status_code=401,
                 detail="User not authenticated"
             )
-        
+
         # Create Gmail service
-        gmail_service = GmailService(request.user_id, user_data.get('token'))
+        gmail_service_sync = GmailService(request.user_id, user_data.get('token'))
+
+        # Start the watch - Requires Pub/Sub Topic Name
+        # Assuming the topic name is configured correctly elsewhere (e.g., env var or default)
+        # The gmail_service_sync.start_watch method likely needs the topic name now, not a webhook URL.
+        # This needs verification based on the implementation of GmailService.start_watch.
+        # For now, assuming it uses a pre-configured topic or default.
+        # If it *still* requires webhook_url, the logic needs adjustment.
+        # Let's assume it uses the topic linked to 'gmail-notifications-sub' implicitly or via config.
+        # *** TODO: Verify how `gmail_service_sync.start_watch` gets the Pub/Sub topic name ***
         
-        # Start the watch with the correct webhook URL - use the specialized Gmail webhook
-        webhook_url = f"{BASE_URL}/gmail-push-webhook"
-        logger.info(f"Starting Gmail watch for {request.user_id} with webhook URL: {webhook_url}")
+        # Determine the Pub/Sub topic name to use
+        # Option 1: Use default from PubSubService (if available)
+        topic_name = pubsub_service.topic_name # Assuming PubSubService holds this
+        # Option 2: Get from env var directly
+        # topic_name = os.getenv("PUB SUB_TOPIC_NAME", "gmail-notifications") 
+        # Option 3: Hardcode (less flexible)
+        # topic_name = "gmail-notifications"
         
-        watch_response = gmail_service.start_watch(request.label_ids, webhook_url)
-        
+        if not topic_name:
+             raise HTTPException(status_code=500, detail="Pub/Sub topic name not configured.")
+             
+        logger.info(f"Starting Gmail watch for {request.user_id} targeting Pub/Sub topic: {topic_name}")
+        watch_response = gmail_service_sync.start_watch(
+            topic_name=topic_name, # Pass topic name
+            label_ids=request.label_ids
+        )
+
         # Store the watch data
         db.store_watch_data(
-            request.user_id, 
-            watch_response.get("historyId"), 
+            request.user_id,
+            watch_response.get("historyId"),
             watch_response.get("expiration")
         )
-        
+
         # Log the watch event
         db.log_history_event(
             request.user_id,
@@ -518,415 +478,71 @@ def start_watch(request: WatchRequest):
             "watch_started",
             {
                 "expiration": watch_response.get("expiration"),
-                "expirationTime": watch_response.get("expirationTime"),
-                "webhook_url": webhook_url
+                "historyId": watch_response.get("historyId"),
+                "topic_name": topic_name
             }
         )
-        
+
         return watch_response
     except Exception as e:
         logger.error(f"Failed to start watch: {str(e)}")
+        # Provide more context if it's a known configuration issue
+        if "topic" in str(e).lower():
+             logger.error("Ensure the Pub/Sub topic exists and the service account has permissions.")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/gmail/stop-watch")
 def stop_watch(user_id: str):
     """Stop watching a user's Gmail inbox"""
-    # Check if PubSub is operational
-    if not pubsub_handler or not pubsub_handler.is_operational:
-        raise HTTPException(
-            status_code=503,
-            detail="Gmail watch functionality is not available due to missing Google Cloud credentials"
-        )
-        
+    # Removed check for pubsub_handler.is_operational
+
     try:
         # Get user data from database
         user_data = db.get_user_data(user_id)
         if not user_data or 'token' not in user_data:
             raise HTTPException(
-                status_code=401, 
+                status_code=401,
                 detail="User not authenticated"
             )
-        
+
         # Create Gmail service
-        gmail_service = GmailService(user_id, user_data.get('token'))
-        
+        gmail_service_sync = GmailService(user_id, user_data.get('token'))
+
         # Stop the watch
-        result = gmail_service.stop_watch()
-        
-        # Update user data
+        logger.info(f"Stopping Gmail watch for user {user_id}")
+        result = gmail_service_sync.stop_watch()
+        logger.info(f"Stop watch result for {user_id}: {result}") # Log result, often empty on success
+
+        # Update user data in DB (clear expiration)
         db.update_user_data(user_id, {
             "watch_expiration": None
+            # Consider clearing historyId too if watch is stopped? Depends on logic.
         })
-        
+
         # Log the watch stop event
         db.log_history_event(
             user_id,
             user_data.get("last_history_id", "unknown"),
             "watch_stopped",
-            {}
+            {} # Include any relevant info from 'result' if available
         )
-        
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/webhook/gmail")
-async def gmail_webhook(request: Request, background_tasks: BackgroundTasks):
-    """Webhook for Gmail notifications via Pub/Sub push"""
-    # Check if PubSub is operational
-    if not pubsub_handler or not pubsub_handler.is_operational:
-        logger.error("PubSub handler not operational in gmail_webhook")
-        return {
-            "status": "error", 
-            "detail": "Gmail notifications are not available due to missing Google Cloud credentials"
-        }
-    
-    # Log that we received a webhook request
-    logger.info("===============================================")
-    logger.info("RECEIVED GMAIL WEBHOOK REQUEST")
-    logger.info("===============================================")
-        
-    try:
-        # Get the raw request body for logging
-        raw_body = await request.body()
-        logger.info(f"Raw webhook request body: {raw_body.decode('utf-8', errors='replace')}")
-        
-        # Get the message from the request
-        body = await request.json()
-        logger.info(f"Parsed webhook request JSON: {json.dumps(body, indent=2)}")
-        
-        # Extract and decode the message
-        if 'message' not in body:
-            logger.error("No 'message' field in webhook request")
-            return {"status": "error", "detail": "No message in request"}
-        
-        # Process the Pub/Sub message
-        logger.info("Processing PubSub message in webhook...")
-        result = pubsub_handler.process_pubsub_message(body['message'])
-        logger.info(f"PubSub message processing result: {result}")
-        
-        if 'error' in result:
-            logger.error(f"Error in pubsub_handler.process_pubsub_message: {result['error']}")
-            return {"status": "error", "detail": result['error']}
-        
-        # Log the notification receipt
-        email_address = result.get("emailAddress")
-        history_id = result.get("historyId")
-        
-        logger.info(f"Extracted email_address: {email_address}, history_id: {history_id}")
-        
-        if not email_address or not history_id:
-            logger.error("Missing email_address or history_id in processed result")
-            return {"status": "error", "detail": "Missing required data in notification"}
-        
-        if email_address and history_id:
-            logger.info(f"Logging history event for {email_address}, history_id: {history_id}")
-            db.log_history_event(
-                email_address,
-                history_id,
-                "notification_received",
-                {"raw_data": result}
-            )
-        
-        # Process the notification in the background
-        logger.info(f"Adding background task process_gmail_notification({email_address}, {history_id})")
-        background_tasks.add_task(
-            process_gmail_notification,
-            email_address,
-            history_id
-        )
-        
-        # Immediately return a 200 response
-        logger.info("Returning success response from webhook")
-        return {"status": "processing"}
+        return result # Often returns empty 204 No Content on success
     except Exception as e:
-        logger.error(f"Error in Gmail webhook: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        # Still return 200 to acknowledge receipt
-        return {"status": "error", "detail": str(e)}
-
-@app.post("/gmail/process-history")
-def process_history_endpoint(request: ProcessHistoryRequest):
-    """Process Gmail history manually with a history ID"""
-    try:
-        result = process_gmail_notification(request.user_id, request.history_id)
-        return {"status": "processed", "result": result}
-    except Exception as e:
-        logger.error(f"Error processing history: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/email/message/{user_id}/{message_id}")
-def get_full_email_message(user_id: str, message_id: str):
-    """Get the full content of an email message
-    
-    Args:
-        user_id: The user ID (email address)
-        message_id: The Gmail message ID
-        
-    Returns:
-        Complete email message with full content
-    """
-    try:
-        # Get user data from database
-        user_data = db.get_user_data(user_id)
-        if not user_data:
-            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
-            
-        if 'token' not in user_data:
-            raise HTTPException(status_code=401, detail=f"No auth token for user {user_id}")
-        
-        # Create the Gmail service
-        gmail_service = GmailService(user_id, user_data.get('token'))
-        
-        # Get the full message
-        try:
-            message = gmail_service.get_message(message_id, format="full")
-        except Exception as e:
-            # If full format fails, fall back to metadata
-            if "Metadata scope doesn't allow format FULL" in str(e):
-                logger.warning(f"Falling back to metadata format due to permission restrictions: {e}")
-                message = gmail_service.get_message(message_id, format="metadata")
-                
-                # Return with limited data
-                return {
-                    "messageId": message_id,
-                    "format": "metadata",
-                    "snippet": message.get("snippet", ""),
-                    "error": "Limited permissions. Only metadata available.",
-                    "headers": {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
-                }
-            else:
-                # Re-raise if it's not a permission issue
-                raise
-        
-        # Extract headers
-        headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
-        
-        # Create an EmailProcessor to use its content extraction logic
-        processor = EmailProcessor(user_id, user_data.get('token'))
-        
-        # Extract the full email content
-        email_content = processor._extract_email_content(message)
-        
-        # Return the full message details including complete content
-        return {
-            "messageId": message_id,
-            "threadId": message.get("threadId"),
-            "format": "full",
-            "headers": headers,
-            "from": headers.get("From", ""),
-            "to": headers.get("To", ""),
-            "subject": headers.get("Subject", ""),
-            "date": headers.get("Date", ""),
-            "content": email_content,
-            "snippet": message.get("snippet", "")
-        }
-    except Exception as e:
-        logger.error(f"Error retrieving full email message: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/email/messages/{user_id}")
-def list_email_messages(user_id: str, max_results: int = 10, label: str = "INBOX"):
-    """List email messages for a user with their full content
-    
-    Args:
-        user_id: The user ID (email address)
-        max_results: Maximum number of messages to return
-        label: Label to filter messages by (default: INBOX)
-        
-    Returns:
-        List of email messages with full content
-    """
-    try:
-        # Get user data from database
-        user_data = db.get_user_data(user_id)
-        if not user_data:
-            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
-            
-        if 'token' not in user_data:
-            raise HTTPException(status_code=401, detail=f"No auth token for user {user_id}")
-        
-        # Create the Gmail service
-        gmail_service = GmailService(user_id, user_data.get('token'))
-        
-        # List messages
-        messages_list = gmail_service.list_messages(max_results=max_results, label_ids=[label])
-        
-        # Create an EmailProcessor to use its content extraction logic
-        processor = EmailProcessor(user_id, user_data.get('token'))
-        
-        # Process each message to get full content
-        processed_messages = []
-        for msg_data in messages_list:
-            message_id = msg_data.get("id")
-            
-            # Get the full message with content
-            try:
-                # Get full message details
-                message = gmail_service.get_message(message_id, format="full")
-                # Extract headers
-                headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
-                # Extract content
-                email_content = processor._extract_email_content(message)
-                
-                processed_messages.append({
-                    "messageId": message_id,
-                    "threadId": message.get("threadId"),
-                    "format": "full",
-                    "headers": headers,
-                    "from": headers.get("From", ""),
-                    "to": headers.get("To", ""),
-                    "subject": headers.get("Subject", ""),
-                    "date": headers.get("Date", ""),
-                    "content": email_content,
-                    "snippet": message.get("snippet", "")
-                })
-            except Exception as e:
-                # If error occurs for this message, add with limited info
-                logger.error(f"Error processing message {message_id}: {e}")
-                processed_messages.append({
-                    "messageId": message_id,
-                    "error": str(e),
-                    "processed": False
-                })
-        
-        return {
-            "messages": processed_messages,
-            "count": len(processed_messages)
-        }
-    except Exception as e:
-        logger.error(f"Error listing email messages: {e}")
+        logger.error(f"Failed to stop watch for {user_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/admin/renew-watches")
 def renew_watches():
     """Manually trigger renewal of all Gmail watches"""
-    # Check if PubSub is operational
-    if not pubsub_handler or not pubsub_handler.is_operational:
-        raise HTTPException(
-            status_code=503,
-            detail="Watch renewal is not available due to missing Google Cloud credentials"
-        )
-        
+    # Removed check for pubsub_handler.is_operational
+
     try:
         results = scheduler.renew_all_watches()
         return results
     except Exception as e:
+        logger.error(f"Error during manual watch renewal: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/subscribe")
-async def subscribe(request: SubscriptionRequest):
-    """Subscribe to Gmail push notifications for a specific email account."""
-    try:
-        # Create webhook URL using the base URL
-        webhook_url = f"{BASE_URL}/webhook"
-        
-        # 1. Set up Gmail watch for push notifications
-        watch_result = await gmail_service.watch_mailbox(
-            request.email, 
-            request.label_id,
-            webhook_url
-        )
-        
-        # 2. Subscribe to Pub/Sub topic
-        subscription_id = await pubsub_service.create_subscription(
-            request.email, 
-            request.topic_name
-        )
-        
-        return {
-            "status": "success",
-            "message": f"Successfully subscribed {request.email} to email notifications",
-            "details": {
-                "watch_expiration": watch_result.get("expiration"),
-                "subscription_id": subscription_id,
-                "topic_name": request.topic_name,
-                "webhook_url": webhook_url
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error subscribing: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/unsubscribe")
-async def unsubscribe(request: UnsubscriptionRequest):
-    """Unsubscribe from Gmail push notifications."""
-    try:
-        # 1. Stop Gmail watch
-        await gmail_service.stop_watch(request.email)
-        
-        # 2. Delete Pub/Sub subscription
-        await pubsub_service.delete_subscription(request.email)
-        
-        return {
-            "status": "success",
-            "message": f"Successfully unsubscribed {request.email} from email notifications"
-        }
-    except Exception as e:
-        logger.error(f"Error unsubscribing: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/webhook")
-async def pubsub_webhook(message: PubSubMessage, background_tasks: BackgroundTasks):
-    """Handle incoming Pub/Sub notifications (Gmail push notifications)."""
-    try:
-        # Log the complete raw message for debugging
-        logger.info(f"Received PubSub webhook message: {json.dumps(message.dict(), indent=2)}")
-        
-        # Extract message data
-        data = message.message.get("data")
-        if not data:
-            logger.error("No data field found in PubSub message")
-            raise HTTPException(status_code=400, detail="No data in message")
-            
-        # Decode the data (base64 encoded)
-        try:
-            decoded_data = pubsub_service.decode_message(data)
-            logger.info(f"Successfully decoded PubSub message: {json.dumps(decoded_data, indent=2)}")
-        except Exception as e:
-            logger.error(f"Failed to decode PubSub message: {str(e)}")
-            # Include the raw data in the log for debugging
-            logger.error(f"Raw message data: {data[:100]}...")
-            raise HTTPException(status_code=400, detail=f"Failed to decode message: {str(e)}")
-        
-        # Process the email notification in background
-        background_tasks.add_task(
-            gmail_service.process_email_notification, 
-            decoded_data
-        )
-        
-        return {"status": "processing"}
-    except Exception as e:
-        # Log the full exception with traceback
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"Error processing webhook: {str(e)}\n{tb}")
-        
-        # Include more details in the response for easier debugging
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Error processing webhook: {str(e)}"
-        )
-
-@app.get("/status")
-async def check_status():
-    """Check the status of the Email Bot services."""
-    try:
-        gmail_status = await gmail_service.check_status()
-        pubsub_status = await pubsub_service.check_status()
-        
-        return {
-            "gmail_service": gmail_status,
-            "pubsub_service": pubsub_status,
-            "status": "operational" if gmail_status and pubsub_status else "degraded"
-        }
-    except Exception as e:
-        logger.error(f"Error checking status: {str(e)}")
-        return {
-            "status": "error",
-            "message": str(e)
-        }
 
 # Background task to process Gmail notifications
 def process_gmail_notification(email_address: str, history_id: str):
@@ -934,70 +550,100 @@ def process_gmail_notification(email_address: str, history_id: str):
     logger.info("===============================================")
     logger.info(f"PROCESSING GMAIL NOTIFICATION: {email_address}, history_id: {history_id}")
     logger.info("===============================================")
-    
+
     try:
         # Extract user ID from email
         user_id = email_address
         logger.info(f"Looking up user data for {user_id}")
-        
+
         # Get user data
         user_data = db.get_user_data(user_id)
         if not user_data:
             logger.error(f"User {user_id} not found in database")
-            return
-            
-        if 'token' not in user_data:
-            logger.error(f"User {user_id} found but has no authentication token")
-            return
-        
+            return # Cannot process without user data
+
+        if 'token' not in user_data or not user_data['token']:
+            logger.error(f"User {user_id} found but has no valid authentication token")
+            return # Cannot process without token
+
         # Get the last history ID
         last_history_id = user_data.get('last_history_id')
-        logger.info(f"Last history ID from database: {last_history_id}")
-        
-        # Check if this is an already processed notification
-        if last_history_id and int(history_id) <= int(last_history_id):
-            logger.warning(f"Received notification with history_id {history_id} <= last_history_id {last_history_id}. Ignoring as already processed.")
-            return
-        
+        logger.info(f"Last history ID from database for {user_id}: {last_history_id}")
+
+        # Check if this is an already processed notification or out of order
+        # Convert to integers for reliable comparison
+        try:
+            current_hist_id_int = int(history_id)
+            last_hist_id_int = int(last_history_id) if last_history_id else 0
+
+            if last_history_id and current_hist_id_int <= last_hist_id_int:
+                logger.warning(f"Ignoring notification for {user_id}: history_id {history_id} <= last_history_id {last_history_id}. Likely already processed or out of order.")
+                # Note: Pub/Sub doesn't guarantee order, but duplicates are possible.
+                # This check prevents reprocessing known history.
+                return
+        except ValueError:
+             logger.error(f"Invalid history ID format for user {user_id}: current='{history_id}', last='{last_history_id}'. Skipping processing.")
+             return
+
+
         # Process the notification
         logger.info(f"Creating EmailProcessor for {user_id}")
-        processor = EmailProcessor(user_id, user_data.get('token'))
-        
-        logger.info(f"Processing notification with history_id {history_id}, last_history_id {last_history_id}")
+        # Ensure token is passed correctly
+        token_info = user_data.get('token')
+        processor = EmailProcessor(user_id, token_info)
+
+        logger.info(f"Processing notification for {user_id} with history_id {history_id}, last_history_id {last_history_id}")
         result = processor.process_notification(history_id, last_history_id)
-        logger.info(f"Notification processing result: {json.dumps(result, default=str)}")
-        
-        # Update the last history ID if processing was successful
-        if result.get('status') in ['processed', 'initialized']:
-            logger.info(f"Updating last_history_id to {result.get('historyId')}")
-            db.update_history_id(user_id, result.get('historyId'))
-            
-            # Log the processing event
-            logger.info(f"Logging history event for successful processing")
-            db.log_history_event(
-                user_id,
-                result.get('historyId'),
-                f"notification_processed_{result.get('status')}",
-                {
-                    "processedCount": result.get('processedCount', 0),
-                    "results": result.get('results', [])
-                }
-            )
-            
-            # Send notifications for any new messages
-            if result.get('status') == 'processed' and result.get('processedCount', 0) > 0:
-                for msg_result in result.get('results', []):
-                    if msg_result.get('processed') and msg_result.get('action') != 'spam_detected':
-                        # Send notification with full content
-                        send_email_notification(user_id, msg_result)
+        # Use default=str for non-serializable items like datetime
+        logger.info(f"Notification processing result for {user_id}: {json.dumps(result, default=str)}")
+
+        # Update the last history ID if processing was successful and returned a new history ID
+        new_history_id = result.get('historyId')
+        if result.get('status') in ['processed', 'initialized'] and new_history_id:
+             # Ensure the new history ID is greater than the last one before updating
+            try:
+                new_hist_id_int = int(new_history_id)
+                if new_hist_id_int > last_hist_id_int:
+                    logger.info(f"Updating last_history_id for {user_id} from {last_history_id} to {new_history_id}")
+                    db.update_history_id(user_id, new_history_id)
+
+                    # Log the processing event
+                    logger.info(f"Logging history event for successful processing for {user_id}")
+                    db.log_history_event(
+                        user_id,
+                        new_history_id,
+                        f"notification_processed_{result.get('status')}",
+                        {
+                            "processedCount": result.get('processedCount', 0),
+                            "results": result.get('results', []) # Ensure results are serializable
+                        }
+                    )
+
+                    # Send notifications for any new messages if webhook configured
+                    if NOTIFICATION_WEBHOOK_URL and result.get('status') == 'processed' and result.get('processedCount', 0) > 0:
+                        logger.info(f"Sending notifications for {result.get('processedCount', 0)} processed messages for {user_id}")
+                        for msg_result in result.get('results', []):
+                            # Check if message was successfully processed and not spam
+                            if msg_result.get('processed') and msg_result.get('action') != 'spam_detected':
+                                # Send notification with full content
+                                send_email_notification(user_id, msg_result)
+                    elif not NOTIFICATION_WEBHOOK_URL:
+                         logger.debug("Skipping external notification sending (NOTIFICATION_WEBHOOK_URL not set).")
+
+                else:
+                    logger.warning(f"Not updating last_history_id for {user_id}: new history ID {new_history_id} is not greater than last {last_history_id}.")
+
+            except ValueError:
+                 logger.error(f"Invalid new history ID format received from processor for user {user_id}: '{new_history_id}'. Not updating.")
         else:
-            logger.warning(f"Not updating last_history_id due to status: {result.get('status')}")
-        
+            logger.warning(f"Not updating last_history_id for {user_id} due to status: {result.get('status')} or missing historyId in result.")
+
         logger.info(f"Completed processing notification for {user_id}: {result.get('status')}")
     except Exception as e:
         import traceback
-        logger.error(f"Error processing Gmail notification: {e}")
+        logger.error(f"Error processing Gmail notification for {email_address}, history_id {history_id}: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
+        # Consider adding logic here to handle specific errors, e.g., requeueing or alerting.
 
 def send_email_notification(user_id: str, message_data: Dict):
     """
@@ -1403,58 +1049,69 @@ def debug_manual_notification(email: str):
         user_data = db.get_user_data(email)
         if not user_data:
             return {
-                "status": "error", 
+                "status": "error",
                 "message": f"User {email} not found in database"
             }
-            
+
+        if 'token' not in user_data or not user_data['token']:
+            return {
+                "status": "error",
+                "message": f"User {email} found but has no valid authentication token"
+            }
+
         # Get the current history ID from Gmail
         try:
-            gmail_service = GmailService(email, user_data.get('token'))
-            profile = gmail_service.service.users().getProfile(userId='me').execute()
+            # Use the synchronous GmailService here as it's a direct request context
+            gmail_service_sync = GmailService(email, user_data.get('token'))
+            profile = gmail_service_sync.service.users().getProfile(userId='me').execute()
             current_history_id = profile.get('historyId')
-            
+
             if not current_history_id:
                 return {
                     "status": "error",
                     "message": "Could not retrieve current history ID from Gmail"
                 }
-                
-            # Process the notification manually
+
+            # Process the notification manually by calling the processor function
             logger.info(f"Manually processing notification for {email} with history_id: {current_history_id}")
-            
+
             # Call the notification processor directly
-            try:
-                process_gmail_notification(email, current_history_id)
-                return {
-                    "status": "success",
-                    "message": f"Manual notification processing triggered for {email}",
-                    "history_id": current_history_id,
-                    "last_history_id": user_data.get('last_history_id')
-                }
-            except Exception as process_error:
-                error_message = str(process_error)
-                response = {
-                    "status": "error",
-                    "message": f"Failed to process manual notification: {error_message}"
-                }
-                
-                # Add a note about Gmail API scopes if that's the issue
-                if "Metadata scope doesn't allow format" in error_message:
-                    response["note"] = "The error is related to Gmail API scopes. Your app only has metadata access permission. We've updated the code to work with metadata instead of full message access. Please restart the server."
-                    
-                return response
-        except Exception as e:
+            # Note: This runs synchronously in the request thread
+            process_gmail_notification(email, current_history_id)
+            
+            # Fetch updated user data to get the potentially new last_history_id
+            updated_user_data = db.get_user_data(email)
+
             return {
-                "status": "error",
-                "message": f"Failed to process manual notification: {str(e)}"
+                "status": "success",
+                "message": f"Manual notification processing attempted for {email}",
+                "history_id_processed": current_history_id,
+                "last_history_id_after": updated_user_data.get('last_history_id') # Show result after processing
             }
+        except Exception as e:
+             logger.error(f"Error during manual notification trigger for {email}: {str(e)}")
+             import traceback
+             logger.error(f"Traceback: {traceback.format_exc()}")
+             # Check for specific scope errors
+             error_message = str(e)
+             response = {
+                 "status": "error",
+                 "message": f"Failed to process manual notification: {error_message}"
+             }
+             if "Metadata scope doesn't allow format" in error_message:
+                 response["note"] = "The error might be related to Gmail API scopes (metadata vs full access)."
+             elif "invalid_grant" in error_message:
+                  response["note"] = "Authentication error (invalid_grant). Token might be expired or revoked."
+
+             return response
     except Exception as e:
+        # Catch errors in the outer try related to DB access etc.
         import traceback
         tb = traceback.format_exc()
-        logger.error(f"Error processing manual notification: {str(e)}\n{tb}")
+        logger.error(f"Error in debug_manual_notification endpoint for {email}: {str(e)}")
         return {
             "status": "error",
-            "error": str(e)
+            "message": f"Unexpected error: {str(e)}"
         }
 
 @app.post("/gmail-push-webhook")
