@@ -442,12 +442,6 @@ class GmailService:
                     elif header["name"] == 'Message-ID':
                         message_id_header = header["value"]
 
-                email = f'\nSTART OF EMAIL\nFrom: {sent_from}\nSubject: {subject}\nBody:\n{original_body}\n'
-
-                message_content = model.generate_content(
-                    "Taking into account the sender (and their email address) and subject and body, give me a plain string response to this email below:\n\n" + email + '\n\nUse this as the persona of the responder and act as them fully:\n\n' + persona + 'Only include the response body, no other text.'
-                )
-
                 if not subject.lower().startswith("re:"):
                     subject = "Re: " + subject
                 

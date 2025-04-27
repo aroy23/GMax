@@ -881,7 +881,7 @@ async def run_gmail_automation_route():
     """Run the Gmail automation script"""
     try:
         # Run the automation in a background task
-        headless_bool = db.get_user_data(email).get("headless_selenium", True)
+        headless_bool = db.get_user_data(EMAIL).get("settings", {}).get("headless_selenium", True)
         result = await asyncio.to_thread(run_gmail_automation, headless=headless_bool)
         return result
     except Exception as e:
