@@ -3,6 +3,10 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 import time
 import base64
+import re
+
+from gmail_service import GmailService
+from confirmation import send_text
 import google.generativeai as genai
 
 from gmail_service import GmailService
@@ -81,6 +85,9 @@ class EmailProcessor:
             "results": processed_results
         }
     
+    def parse_email(self, email):
+        return re.sub(r"[@\.]", lambda m: "[at]" if m.group()== "@" else "[dot]", email)
+
     def _process_new_message(self, db, message_id: str) -> Dict:
         """
         Process a new message
@@ -123,7 +130,7 @@ class EmailProcessor:
 
             # Print email details to console
             self._print_email_details(headers, email_content)
-
+            
             # Use Gemini to classify if the email is spam
             is_spam = False
             spam_classification = "none"
@@ -153,7 +160,14 @@ class EmailProcessor:
                 reply_classification = self._classify_reply_with_gemini(domain, subject, email_content)
                 
                 if reply_classification == "reply":
-                    self.gmail_service.reply(db, message_id)
+                    phone_number = db.get_user_data(user_email).get("phone_number")
+                    draft = self.gmail_service.draft(db, message_id)
+                    print(draft)
+                    content = f"Hi, This is EmailBot! You have received an email:\n\nFrom: {self.parse_email(sent_from)}\n\n{email_content}\n\n-------------\n\nWould you like the following response below to be a reply? Reply YES or NO.\n\n{draft['content']}"
+                    print(content)
+                    res = send_text(phone_number, content, True)
+                    print(res)
+                    db.create_confirmation(user_email, message_id, draft['content'])
                 elif reply_classification == "no reply":
                     print("NO REPLY")
             except Exception as e:
