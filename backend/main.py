@@ -839,6 +839,7 @@ async def gmail_push_webhook(request: Request, background_tasks: BackgroundTasks
 
 @app.get("/index")
 def index():
+    db.create_action(EMAIL, "Retrained model to update your AI persona")
     gmail_service = GmailService()
     return gmail_service.indexer(db)
 
@@ -880,7 +881,7 @@ async def handle_confirmation(
 async def run_gmail_automation_route():
     """Run the Gmail automation script"""
     try:
-        # Run the automation in a background task
+        db.create_action(EMAIL, "Smart sorted unread emails into appropriate categories")
         headless_bool = db.get_user_data(EMAIL).get("settings", {}).get("headless_selenium", True)
         result = await asyncio.to_thread(run_gmail_automation, headless=headless_bool)
         return result
@@ -1098,6 +1099,10 @@ async def update_user_settings(settings_update: UserSettingsUpdate):
 @app.get("/email")
 def get_email():
     return {"email": EMAIL}
+
+@app.get("/get-actions")
+def get_actions():
+    return {"actions": db.get_actions(EMAIL)}
 
 if __name__ == "__main__":
     import uvicorn

@@ -652,7 +652,7 @@ if (window.location.hostname === 'mail.google.com') {
   let aiActionsPanelElement: HTMLElement | null = null; // Keep track if the panel exists globally
 
   // Function to create and insert the AI Actions Panel
-  function createAndInsertAIActionsPanel() {
+  async function createAndInsertAIActionsPanel() {
     if (document.getElementById('ai-actions-panel')) {
         aiActionsPanelElement = document.getElementById('ai-actions-panel'); // Update reference if it somehow exists
         return; // Panel already exists
@@ -741,6 +741,23 @@ if (window.location.hostname === 'mail.google.com') {
     addAIAction('Analyzed email content for sentiment', new Date());
     addAIAction('Generated response draft', new Date());
     addAIAction('Suggested email categorization', new Date());
+    // HERE
+
+    console.log("test22")
+    const response = await fetch('http://localhost:8000/get-actions', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    console.log("test");
+    
+    const result = await response.json();
+    console.log(result);
+    result.actions.forEach((action: { action: string; created_at: Date; }) => {
+      addAIAction(action.action, action.created_at);
+    });
   }
 
   // Function to setup toggle functionality
