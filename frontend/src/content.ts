@@ -254,8 +254,53 @@ if (window.location.hostname === 'mail.google.com') {
     }
   });
 
-  // Function to add messages to the chat
-  function addMessage(text: string, sender: 'user' | 'bot') {
+  // Add WebSocket connection for status updates
+  let ws: WebSocket | null = null;
+
+  function connectWebSocket() {
+    ws = new WebSocket('ws://localhost:8000/ws/status');
+    
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      const message = data.message;
+      const type = data.type;
+      
+      // Style message based on type
+      let style = '';
+      switch(type) {
+        case 'success':
+          style = 'color: #00ff9d;';
+          break;
+        case 'error':
+          style = 'color: #ff4444;';
+          break;
+        case 'warning':
+          style = 'color: #ffffff;';
+          break;
+        default:
+          style = 'color: #ffffff;';
+      }
+      
+      addMessage(message, 'bot', style);
+    };
+    
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      addMessage('Connection to status updates lost', 'bot', 'color: #ff4444;');
+    };
+    
+    ws.onclose = () => {
+      console.log('WebSocket connection closed');
+      // Attempt to reconnect after 5 seconds
+      setTimeout(connectWebSocket, 5000);
+    };
+  }
+
+  // Connect WebSocket when content script loads
+  connectWebSocket();
+
+  // Modify addMessage function to accept style
+  function addMessage(text: string, sender: 'user' | 'bot', style: string = '') {
     const messageDiv = document.createElement('div');
     messageDiv.style.cssText = `
       padding: 10px 14px;
@@ -268,6 +313,7 @@ if (window.location.hostname === 'mail.google.com') {
         ? 'background: #00ff9d; color: #1a1a1a; align-self: flex-end;' 
         : 'background: #2a2a2a; color: #ffffff; align-self: flex-start;'}
       box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+      ${style}
     `;
     messageDiv.textContent = text;
     messagesContainer.appendChild(messageDiv);
@@ -275,12 +321,27 @@ if (window.location.hostname === 'mail.google.com') {
   }
 
   // Function to process user messages
-  function processUserMessage(message: string) {
-    // TODO: Implement message processing logic
-    // For now, just echo the message
-    setTimeout(() => {
-      addMessage(`You said: "${message}"`, 'bot');
-    }, 500);
+  async function processUserMessage(message: string) {
+    if (message.toLowerCase() === 'smart sort' || message.toLowerCase() === 'sort emails') {
+      try {
+        addMessage('Starting smart sort automation...', 'bot', 'color: #40e0d0;');
+        
+        const response = await fetch('http://localhost:8000/gmail/automate');
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+          addMessage('Smart sort completed successfully!', 'bot', 'color: #00ff9d;');
+        } else {
+          addMessage(`Error during smart sort: ${result.detail}`, 'bot', 'color: #ff4444;');
+        }
+      } catch (error) {
+        addMessage(`Failed to run smart sort: ${error}`, 'bot', 'color: #ff4444;');
+      }
+    } else {
+      setTimeout(() => {
+        addMessage(`You said: "${message}"`, 'bot');
+      }, 500);
+    }
   }
 
   // Add welcome message
@@ -601,9 +662,27 @@ if (window.location.hostname === 'mail.google.com') {
     smartSortButton.style.boxShadow = 'none';
   });
 
-  smartSortButton.addEventListener('click', () => {
-    // TODO: Implement smart sort functionality
-    console.log('Smart Sort clicked');
+  smartSortButton.addEventListener('click', async () => {
+    try {
+      addMessage('Starting smart sort automation...', 'bot', 'color: #40e0d0;');
+      
+      const response = await fetch('http://localhost:8000/gmail/automate');
+      const result = await response.json();
+      
+      if (result.status === 'success') {
+        addMessage('Smart sort completed successfully!', 'bot', 'color: #00ff9d;');
+        if (result.refresh) {
+          // Wait a moment to show the success message before refreshing
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        }
+      } else {
+        addMessage(`Error during smart sort: ${result.detail}`, 'bot', 'color: #ff4444;');
+      }
+    } catch (error) {
+      addMessage(`Failed to run smart sort: ${error}`, 'bot', 'color: #ff4444;');
+    }
   });
 
   quickActionsPanel.appendChild(retrainButton);
