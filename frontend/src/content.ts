@@ -377,7 +377,7 @@ if (window.location.hostname === 'mail.google.com') {
 
   // Get references to settings controls
   const headlessSeleniumToggle = document.getElementById('headless-selenium-toggle') as HTMLInputElement;
-  const autoSendToggle = document.getElementById('auto-send-toggle') as HTMLInputElement;
+  const autoReplyToggle = document.getElementById('auto-reply-toggle') as HTMLInputElement;
   const autoSpamRecoveryToggle = document.getElementById('auto-spam-recovery-toggle') as HTMLInputElement;
   const phoneNumberInput = document.getElementById('phone-number-input') as HTMLInputElement;
   const saveSettingsButton = document.getElementById('save-settings-button') as HTMLButtonElement;
@@ -411,7 +411,7 @@ if (window.location.hostname === 'mail.google.com') {
         // Update UI with fetched settings
         if (data.settings) {
           headlessSeleniumToggle.checked = data.settings.headless_selenium || false;
-          autoSendToggle.checked = data.settings.auto_send || false;
+          autoReplyToggle.checked = data.settings.auto_reply || false;
           autoSpamRecoveryToggle.checked = data.settings.auto_spam_recovery || false;
           phoneNumberInput.value = data.settings.phone_number || '';
         }
@@ -450,7 +450,7 @@ if (window.location.hostname === 'mail.google.com') {
       // Collect settings from UI
       const settings = {
         headless_selenium: headlessSeleniumToggle.checked,
-        auto_send: autoSendToggle.checked,
+        auto_reply: autoReplyToggle.checked,
         auto_spam_recovery: autoSpamRecoveryToggle.checked,
         phone_number: phoneNumberInput.value || null,
         email: userEmail // Include email in the settings payload
@@ -523,6 +523,66 @@ if (window.location.hostname === 'mail.google.com') {
     gap: 8px;
     z-index: 9999;
   `;
+
+  // Add a drag handle to quick actions panel
+  const quickActionsDragHandle = document.createElement('div');
+  quickActionsDragHandle.style.cssText = `
+    width: 100%;
+    padding: 4px 0;
+    margin-bottom: 6px;
+    cursor: move;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    user-select: none;
+  `;
+  quickActionsDragHandle.innerHTML = `
+    <div style="width: 40px; height: 4px; background: rgba(64, 224, 208, 0.3); border-radius: 2px;"></div>
+  `;
+  quickActionsPanel.insertBefore(quickActionsDragHandle, quickActionsPanel.firstChild);
+
+  // Draggable functionality for quick actions panel
+  let quickActionsIsDragging = false;
+  let quickActionsCurrentX: number;
+  let quickActionsCurrentY: number;
+  let quickActionsInitialX: number;
+  let quickActionsInitialY: number;
+  let quickActionsXOffset = 0;
+  let quickActionsYOffset = 0;
+
+  quickActionsPanel.addEventListener('mousedown', quickActionsDragStart);
+  document.addEventListener('mousemove', quickActionsDrag);
+  document.addEventListener('mouseup', quickActionsDragEnd);
+
+  function quickActionsDragStart(e: MouseEvent) {
+    // Don't start drag if clicking on buttons
+    const target = e.target as HTMLElement;
+    if (target instanceof HTMLButtonElement || 
+        target.closest('button')) {
+      return;
+    }
+
+    quickActionsInitialX = e.clientX - quickActionsXOffset;
+    quickActionsInitialY = e.clientY - quickActionsYOffset;
+    quickActionsIsDragging = true;
+  }
+
+  function quickActionsDrag(e: MouseEvent) {
+    if (quickActionsIsDragging) {
+      e.preventDefault();
+      quickActionsCurrentX = e.clientX - quickActionsInitialX;
+      quickActionsCurrentY = e.clientY - quickActionsInitialY;
+
+      quickActionsXOffset = quickActionsCurrentX;
+      quickActionsYOffset = quickActionsCurrentY;
+
+      quickActionsPanel.style.transform = `translate3d(${quickActionsCurrentX}px, ${quickActionsCurrentY}px, 0)`;
+    }
+  }
+
+  function quickActionsDragEnd() {
+    quickActionsIsDragging = false;
+  }
 
   const retrainButton = document.createElement('button');
   retrainButton.innerHTML = `
@@ -705,9 +765,7 @@ if (window.location.hostname === 'mail.google.com') {
             // Add each rescued email with details
             result.results.rescued_emails.forEach((email: { from: string; subject: string; preview?: string }, index: number) => {
               const emailDetails = `${index + 1}. From: ${email.from}
-              Subject: ${email.subject}
-              Preview: ${email.preview?.substring(0, 60)}${email.preview && email.preview.length > 60 ? '...' : ''}`;
-              
+              Subject: ${email.subject}`;              
               // Add with slight delay between messages for better readability
               setTimeout(() => {
                 addMessage(emailDetails, 'bot', 'color: #ffffff; background: rgba(64, 224, 208, 0.1);');
@@ -716,11 +774,11 @@ if (window.location.hostname === 'mail.google.com') {
           }, 300);
         }
         
-        if (result.refresh) {
+        if (result.results.rescued > 0) {
           // Wait a longer moment to show the success message and email details before refreshing
           setTimeout(() => {
             window.location.reload();
-          }, 2000 + (result.results.rescued_emails?.length || 0) * 200);
+          }, 1000);
         }
       } else {
         addMessage(`Error during spam rescue: ${result.detail}`, 'bot', 'color: #ff4444;');
