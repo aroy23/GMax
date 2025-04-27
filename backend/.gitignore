@@ -1,1 +1,16 @@
 .venv/
+.env
+client_secret.json
+service-account-key.json
+__pycache__/
+./services/__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+
+credentials.json
+token.json
