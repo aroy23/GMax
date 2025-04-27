@@ -743,41 +743,50 @@ if (window.location.hostname === 'mail.google.com') {
 
   rescueSpamButton.addEventListener('click', async () => {
     try {
-      let auto_check = true;
       // First get the user's email from the /email endpoint
       const emailResponse = await fetch('http://localhost:8000/email');
       const emailData = await emailResponse.json();
       const userEmail = emailData.email;
+      
       // Use the email as a query parameter
       const settingsResponse = await fetch(`http://localhost:8000/settings?email=${encodeURIComponent(userEmail)}`);
       const settingsData = await settingsResponse.json();
-      console.log(settingsData);
-      if (settingsData.settings.auto_spam_recovery) {
-        auto_check = true;
-      } else {
-        auto_check = false;
-      }
       
-      if (auto_check) {
-        while (settingsData.settings.auto_spam_recovery) {
-          addMessage('Auto Checking spam folder for legitimate emails...', 'bot', 'color: #40e0d0;');
-          const rep = await fetch(`http://localhost:8000/settings?email=${encodeURIComponent(userEmail)}`);
-          const rep_data = await rep.json();
-
-          if (!rep_data.settings.auto_spam_recovery) {
+      if (settingsData.settings.auto_spam_recovery) {
+        // Auto recovery mode with maximum iterations and delay
+        addMessage('Auto checking spam folder for legitimate emails...', 'bot', 'color: #40e0d0;');
+        let maxIterations = 20; // Prevent infinite loop
+        let iterationCount = 0;
+        
+        while (true) {
+          // Check if we've hit the maximum iterations
+          if (iterationCount >= maxIterations) {
+            addMessage('Maximum auto-check iterations reached.', 'bot', 'color: #ffaa00;');
             break;
           }
+          
+          // Get the latest settings to check if auto-recovery is still enabled
+          const latestSettingsResponse = await fetch(`http://localhost:8000/settings?email=${encodeURIComponent(userEmail)}`);
+          const latestSettings = await latestSettingsResponse.json();
+          
+          // Break if auto recovery is disabled
+          if (!latestSettings.settings.auto_spam_recovery) {
+            addMessage('Auto spam recovery turned off.', 'bot', 'color: #40e0d0;');
+            break;
+          }
+          
+          // Process spam emails
           const autoResponse = await fetch('http://localhost:8000/gmail/rescue-spam');
-          const auto_result = await autoResponse.json();
+          const autoResult = await autoResponse.json();
             
-          if (auto_result.status === 'success') {
+          if (autoResult.status === 'success') {
             // If emails were rescued, display details about them
-            if (auto_result.results.rescued > 0 && auto_result.results.rescued_emails && auto_result.results.rescued_emails.length > 0) {
+            if (autoResult.results.rescued > 0 && autoResult.results.rescued_emails && autoResult.results.rescued_emails.length > 0) {
               // Add a small delay to separate messages
               setTimeout(() => {
                 addMessage('Rescued emails:', 'bot', 'color: #40e0d0; font-weight: 500;');
                 // Add each rescued email with details
-                auto_result.results.rescued_emails.forEach((email: { from: string; subject: string; preview?: string }, index: number) => {
+                autoResult.results.rescued_emails.forEach((email: { from: string; subject: string; preview?: string }, index: number) => {
                   const emailDetails = `${index + 1}. From: ${email.from}
                   Subject: ${email.subject}`;              
                   // Add with slight delay between messages for better readability
@@ -786,11 +795,18 @@ if (window.location.hostname === 'mail.google.com') {
                   }, index * 200);
                 });
               }, 300);
+            } else {
+              addMessage('No new legitimate emails found in spam.', 'bot', 'color: #40e0d0;');
             }
-          } 
-          else {
+          } else {
+            addMessage(`Error during auto spam rescue: ${autoResult.detail || 'Unknown error'}`, 'bot', 'color: #ff4444;');
             break; // Exit the loop if not successful
           }
+          
+          iterationCount++;
+          
+          // Add delay between iterations
+          await new Promise(resolve => setTimeout(resolve, 5000));
         }
       } else {
         // Regular non-auto check
@@ -832,7 +848,7 @@ if (window.location.hostname === 'mail.google.com') {
             }, 1000);
           }
         } else {
-          addMessage(`Error during spam rescue: ${result.detail}`, 'bot', 'color: #ff4444;');
+          addMessage(`Error during spam rescue: ${result.detail || 'Unknown error'}`, 'bot', 'color: #ff4444;');
         }
       }
     } catch (error) {
