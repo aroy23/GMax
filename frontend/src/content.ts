@@ -17,7 +17,7 @@ if (window.location.hostname === 'mail.google.com') {
     bottom: 20px;
     right: 20px;
     width: 350px;
-    height: 500px;
+    height: 300px;
     background: linear-gradient(145deg, #0a1929, #0d2b3e);
     border-radius: 16px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2),
@@ -157,7 +157,7 @@ if (window.location.hostname === 'mail.google.com') {
   if (minimizeButton) {
     minimizeButton.addEventListener('click', () => {
       const isMinimized = chatboxContainer.style.height === '60px';
-      chatboxContainer.style.height = isMinimized ? '500px' : '60px';
+      chatboxContainer.style.height = isMinimized ? '300px' : '60px';
       
       if (isMinimized) {
         // Expanding
@@ -1216,6 +1216,15 @@ if (window.location.hostname === 'mail.google.com') {
                 }
                 
                 (scoreValue as HTMLElement).style.color = color;
+
+                // Add warning message if score is above 60%
+                if (targetScore > 60) {
+                  addMessage(
+                    `⚠️ Warning: This email has a high phishing risk score of ${targetScore}%. Please be cautious and verify the sender's identity before taking any action.`,
+                    'bot',
+                    'color: #ff4444;'
+                  );
+                }
               } else {
                 // Animate to the final score
                 const animateToFinal = setInterval(() => {
@@ -1235,6 +1244,14 @@ if (window.location.hostname === 'mail.google.com') {
                   
                   if (newValue >= targetScore) {
                     clearInterval(animateToFinal);
+                    // Add warning message if score is above 60%
+                    if (targetScore > 60) {
+                      addMessage(
+                        `⚠️ Warning: This email has a high phishing risk score of ${targetScore}%. Please be cautious and verify the sender's identity before taking any action.`,
+                        'bot',
+                        'color: #ff4444;'
+                      );
+                    }
                   }
                 }, 50);
               }
