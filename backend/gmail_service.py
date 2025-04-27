@@ -542,7 +542,7 @@ class GmailService:
                 email = f'\nSTART OF EMAIL\nFrom: {sent_from}\nSubject: {subject}\nBody:\n{original_body}\n'
 
                 message_content = model.generate_content(
-                    "Taking into account the sender (and their email address) and subject and body, give me a plain string response to this email below:\n\n" + email + '\n\nUse this as the persona of the responder and act as them fully:\n\n' + persona + 'Only include the response body, no other text.'
+                    "Taking into account the sender (and their email address) and subject and body, give me a plain string response to this email below:\n\n" + email + '\n\nUse this as the persona of the responder and act as them fully:\n\n' + persona + 'Only include the response body, no other text. Be professional situtationally appropriate and use the tone of the email and incorporate your persona into the response.'
                 )
 
                 if not subject.lower().startswith("re:"):
@@ -623,7 +623,7 @@ class GmailService:
                 emails.append(email)
 
             persona_response = model.generate_content(
-                "Take these 5 emails below and give me a plain string prompt that you can take in as a plain string later that acts as a persona that captures the email writing style of the sender, recognizing tone and levels of professionalism by also taking into account the address the email is sent to:\n\n" + str([m.get("snippet") + "\n\n" for m in selected_messages]) + "Only include the response body, no other text"
+                "Take these 5 emails below and give me a plain string prompt that you can take in as a plain string later that acts as a persona that captures the email writing style of the sender, recognizing tone and levels of professionalism:\n\n" + str([m.get("snippet") + "\n\n" for m in selected_messages]) + "Only include the response body, no other text. Make no individual references in the persona, it should be solely stylistic information for someone to learn how emails are written"
             )
             
             persona = persona_response.text
