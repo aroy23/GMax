@@ -758,6 +758,8 @@ if (window.location.hostname === 'mail.google.com') {
         
         addMessage(summary, 'bot', 'color: #00ff9d;');
         
+        addAIAction("Checked spam folder for non-spam emails", new Date());
+        
         // If emails were rescued, display details about them
         if (result.results.rescued > 0 && result.results.rescued_emails && result.results.rescued_emails.length > 0) {
           // Add a small delay to separate messages

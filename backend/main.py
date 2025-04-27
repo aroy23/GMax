@@ -1027,7 +1027,9 @@ async def rescue_misclassified_spam(
             background_tasks.add_task(schedule_next_check)
             logger.info(f"Scheduled next spam rescue check in 24 hours")
             results["next_check_scheduled"] = True
-                
+        
+        db.create_action(EMAIL, "Checked spam folder for non-spam emails")
+
         return {
             "status": "success",
             "results": results
