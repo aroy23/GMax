@@ -3,7 +3,7 @@ from datetime import datetime
 from supabase import create_client, Client
 import json
 
-from config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_USER_TABLE, SUPABASE_HISTORY_TABLE, SUPABASE_CONFIRMATIONS_TABLE
+from config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_USER_TABLE, SUPABASE_HISTORY_TABLE, SUPABASE_CONFIRMATIONS_TABLE, SUPABASE_ACTIONS_TABLE
 
 class SupabaseDB:
     """Supabase database for storing user data and Gmail history"""
@@ -288,3 +288,18 @@ class SupabaseDB:
         result = self.supabase.table(SUPABASE_CONFIRMATIONS_TABLE).select("*").eq("user_id", user_id).execute()
         if result.data and len(result.data) > 0:
             return result.data[0]
+
+    def create_action(self, user_id, action):
+        action_data = {}
+        action_data["user_id"] = user_id
+        action_data["action"] = action
+        self.supabase.table(SUPABASE_ACTIONS_TABLE).upsert(
+            action_data
+        ).execute()
+    
+    def get_actions(self, user_id):
+        result = self.supabase.table(SUPABASE_ACTIONS_TABLE).select("*").eq("user_id", user_id).order("id", desc=False).execute()
+        if result.data:
+            return result.data
+        else:
+            return []

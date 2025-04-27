@@ -417,6 +417,12 @@ class GmailService:
         b64 = data.replace("-", "+").replace("_", "/")
         b64 += "=" * ((4 - len(b64) % 4) % 4)
         return base64.b64decode(b64).decode("utf-8", errors="replace")
+    
+    def get_email_address(self, email_string):
+        email = email_string
+        if email.find('<') != -1:
+            email = email[:email.index('<') - 1]
+        return email
 
     def reply(self, db, original_email_id: str, body: str):
         try:
@@ -462,6 +468,7 @@ class GmailService:
                 )
 
                 print("Replied!", send_message["id"])
+                db.create_action(user_email, f"Replied to {self.get_email_address(sent_from)}")
 
         except HttpError as error:
             print(f"An error occurred: {error}")
@@ -565,6 +572,7 @@ class GmailService:
                 )
 
                 print(send_message["id"])
+                db.create_action(user_email, f"Replied to {self.get_email_address(sent_from)}")
 
         except HttpError as error:
             print(f"An error occurred: {error}")
