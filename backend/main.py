@@ -13,6 +13,7 @@ import threading
 import httpx
 import uuid
 from google.cloud import pubsub_v1
+from datetime import datetime
 from google.generativeai import GenerativeModel
 import google.generativeai as genai
 
@@ -885,6 +886,108 @@ async def analyze_phishing(email: EmailContent):
             "status": "error",
             "detail": str(e)
         }
+
+@app.get("/gmail/rescue-spam")
+@app.post("/gmail/rescue-spam")
+async def rescue_misclassified_spam(
+    background_tasks: BackgroundTasks,
+    max_emails: int = 50,
+    periodic_check: bool = False
+):
+    """
+    Scan all spam emails and rescue any that appear to be legitimate.
+    
+    This endpoint:
+    1. Fetches all emails with the SPAM label
+    2. Analyzes each email with Gemini to determine if it's legitimate
+    3. Moves misclassified emails from Spam to Inbox
+    
+    Args:
+        max_emails: Maximum number of spam emails to analyze (default: 50)
+        periodic_check: Whether to schedule recurring checks (default: False)
+    """
+    try:
+        # Initialize Gmail service
+        gmail_service = GmailService()
+        
+        # Initialize the email processor for AI classification
+        email_processor = EmailProcessor()
+        
+        # Get all messages with SPAM label
+        spam_messages = gmail_service.list_messages(max_results=max_emails, label_ids=["SPAM"])
+        
+        if not spam_messages:
+            return {"status": "success", "message": "No spam messages found to analyze"}
+        
+        results = {
+            "analyzed": 0,
+            "rescued": 0,
+            "kept_as_spam": 0,
+            "rescued_emails": []
+        }
+        
+        # Process each spam message
+        for message_meta in spam_messages:
+            message_id = message_meta.get("id")
+            
+            # Get the full message
+            message = gmail_service.get_message(message_id, format="full")
+            
+            # Extract headers and content
+            headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
+            email_content = email_processor._extract_email_content(message)
+            
+            # Extract sender domain from email
+            sender = headers.get("From", "")
+            domain = sender.split('@')[-1].split('>')[0] if '@' in sender else ""
+            subject = headers.get("Subject", "")
+            
+            # Use Gemini to determine if this is really spam
+            classification = email_processor._classify_spam_with_gemini(domain, subject, email_content)
+            
+            results["analyzed"] += 1
+            
+            # If not spam, rescue it
+            if classification == "not spam":
+                # Move from Spam to Inbox
+                gmail_service.modify_message(
+                    message_id=message_id,
+                    add_labels=["INBOX"],
+                    remove_labels=["SPAM"]
+                )
+                
+                results["rescued"] += 1
+                results["rescued_emails"].append({
+                    "from": sender,
+                    "subject": subject,
+                    "preview": email_content[:100] + "..." if len(email_content) > 100 else email_content
+                })
+                
+                logger.info(f"Rescued email from spam: {subject} from {sender}")
+            else:
+                results["kept_as_spam"] += 1
+                logger.info(f"Confirmed spam: {subject} from {sender}")
+        
+        # If periodic check is requested, schedule another check in 24 hours
+        if periodic_check:
+            async def schedule_next_check():
+                await asyncio.sleep(24 * 60 * 60)  # 24 hours in seconds
+                logger.info("Running scheduled spam rescue check")
+                # Run the rescue operation again with the same parameters
+                await rescue_misclassified_spam(background_tasks, max_emails, True)
+            
+            background_tasks.add_task(schedule_next_check)
+            logger.info(f"Scheduled next spam rescue check in 24 hours")
+            results["next_check_scheduled"] = True
+                
+        return {
+            "status": "success",
+            "results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"Error rescuing spam: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
