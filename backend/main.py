@@ -14,6 +14,8 @@ import httpx
 import uuid
 from google.cloud import pubsub_v1
 from datetime import datetime
+from google.generativeai import GenerativeModel
+import google.generativeai as genai
 
 from gmail_auth import start_oauth_flow, complete_oauth_flow
 from gmail_service import GmailService
@@ -88,6 +90,10 @@ scheduler = WatchScheduler(db)
 
 # Initialize PubSub service
 pubsub_service = PubSubService()
+
+# Initialize Gemini
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = GenerativeModel('gemini-2.0-flash')
 
 # --- Refactored Streaming Pull Logic ---
 
@@ -267,6 +273,12 @@ class UnsubscriptionRequest(BaseModel):
 class PubSubMessage(BaseModel):
     message: Dict[str, Any]
     subscription: str
+
+class EmailContent(BaseModel):
+    subject: str
+    sender: str
+    date: str
+    content: str
 
 @app.get("/")
 def root():
@@ -829,6 +841,51 @@ async def run_gmail_automation_route():
     except Exception as e:
         logger.error(f"Error running Gmail automation: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/analyze-phishing")
+async def analyze_phishing(email: EmailContent):
+    try:
+        # Create a prompt for Gemini
+        prompt = f"""
+        Analyze this email for phishing risk and provide a score from 0-100% where 0% is definitely safe and 100% is definitely phishing.
+        Consider the following aspects:
+        - Email content and tone
+        - Sender information
+        - Subject line
+        - Any suspicious links or requests
+        - Overall context
+
+        Email Details:
+        Subject: {email.subject}
+        From: {email.sender}
+        Date: {email.date}
+        Content: {email.content}
+
+        Provide ONLY a number between 0 and 100 representing the phishing risk percentage.
+        """
+
+        # Get response from Gemini
+        response = model.generate_content(prompt)
+        
+        # Extract the score from the response
+        try:
+            score = int(response.text.strip().replace('%', ''))
+            # Ensure score is between 0 and 100
+            score = max(0, min(100, score))
+        except ValueError:
+            score = 50  # Default score if parsing fails
+            
+        return {
+            "status": "success",
+            "score": score,
+            "explanation": response.text
+        }
+    except Exception as e:
+        logger.error(f"Error analyzing phishing: {str(e)}")
+        return {
+            "status": "error",
+            "detail": str(e)
+        }
 
 @app.get("/gmail/rescue-spam")
 @app.post("/gmail/rescue-spam")
