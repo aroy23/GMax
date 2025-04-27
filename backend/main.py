@@ -14,7 +14,7 @@ import httpx
 import uuid
 from google.cloud import pubsub_v1
 
-from gmail_auth import start_oauth_flow, complete_oauth_flow, revoke_token
+from gmail_auth import start_oauth_flow, complete_oauth_flow
 from gmail_service import GmailService
 from supabase_db import SupabaseDB
 from email_processor import EmailProcessor
@@ -367,58 +367,58 @@ async def auth_callback(request: Request):
             return RedirectResponse(url=f"{BASE_URL}/?auth_error=true&error={str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/auth/reset")
-@app.get("/auth/reset")
-def reset_auth(user_id: str):
-    """Reset a user's authentication and force re-authentication with new scopes"""
-    try:
-        logger.info(f"Resetting authentication for user: {user_id}")
+# @app.post("/auth/reset")
+# @app.get("/auth/reset")
+# def reset_auth(user_id: str):
+#     """Reset a user's authentication and force re-authentication with new scopes"""
+#     try:
+#         logger.info(f"Resetting authentication for user: {user_id}")
         
-        # 1. Get current token from database
-        user_data = db.get_user_data(user_id)
-        if not user_data or 'token' not in user_data:
-            return {
-                "status": "warning", 
-                "message": f"No token found for {user_id}"
-            }
+#         # 1. Get current token from database
+#         user_data = db.get_user_data(user_id)
+#         if not user_data or 'token' not in user_data:
+#             return {
+#                 "status": "warning", 
+#                 "message": f"No token found for {user_id}"
+#             }
             
-        token_data = user_data.get('token')
+#         token_data = user_data.get('token')
         
-        # 2. Try to revoke token if we have an access token
-        if token_data and 'token' in token_data:
-            try:
-                revoke_result = revoke_token(token_data['token'])
-                logger.info(f"Token revocation result: {revoke_result}")
-            except Exception as e:
-                logger.error(f"Error revoking token: {e}")
+#         # 2. Try to revoke token if we have an access token
+#         if token_data and 'token' in token_data:
+#             try:
+#                 revoke_result = revoke_token(token_data['token'])
+#                 logger.info(f"Token revocation result: {revoke_result}")
+#             except Exception as e:
+#                 logger.error(f"Error revoking token: {e}")
         
-        # 3. Delete token file if it exists
-        token_filename = f"{user_id}_{TOKEN_FILE}"
-        if os.path.exists(token_filename):
-            try:
-                os.remove(token_filename)
-                logger.info(f"Removed token file for {user_id}")
-            except Exception as e:
-                logger.error(f"Error removing token file: {e}")
+#         # 3. Delete token file if it exists
+#         token_filename = f"{user_id}_{TOKEN_FILE}"
+#         if os.path.exists(token_filename):
+#             try:
+#                 os.remove(token_filename)
+#                 logger.info(f"Removed token file for {user_id}")
+#             except Exception as e:
+#                 logger.error(f"Error removing token file: {e}")
                 
-        # 4. Clear token in database
-        try:
-            db.update_user_data(user_id, {'token': None})
-            logger.info(f"Cleared token in database for {user_id}")
-        except Exception as e:
-            logger.error(f"Error clearing token in database: {e}")
+#         # 4. Clear token in database
+#         try:
+#             db.update_user_data(user_id, {'token': None})
+#             logger.info(f"Cleared token in database for {user_id}")
+#         except Exception as e:
+#             logger.error(f"Error clearing token in database: {e}")
         
-        # 5. Generate a new auth URL for the user
-        auth_url = start_oauth_flow("http://localhost:8000/auth/callback", state=user_id)
+#         # 5. Generate a new auth URL for the user
+#         auth_url = start_oauth_flow("http://localhost:8000/auth/callback", state=user_id)
         
-        return {
-            "status": "success",
-            "message": "Authentication reset successfully. Please re-authenticate with the new URL.",
-            "auth_url": auth_url
-        }
-    except Exception as e:
-        logger.error(f"Error resetting authentication: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+#         return {
+#             "status": "success",
+#             "message": "Authentication reset successfully. Please re-authenticate with the new URL.",
+#             "auth_url": auth_url
+#         }
+#     except Exception as e:
+#         logger.error(f"Error resetting authentication: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/gmail/watch")
 def start_watch(request: WatchRequest):
@@ -436,7 +436,7 @@ def start_watch(request: WatchRequest):
             )
 
         # Create Gmail service
-        gmail_service_sync = GmailService(request.user_id, user_data.get('token'))
+        gmail_service_sync = GmailService()
 
         # Start the watch - Requires Pub/Sub Topic Name
         # Assuming the topic name is configured correctly elsewhere (e.g., env var or default)
@@ -506,7 +506,7 @@ def stop_watch(user_id: str):
             )
 
         # Create Gmail service
-        gmail_service_sync = GmailService(user_id, user_data.get('token'))
+        gmail_service_sync = GmailService()
 
         # Stop the watch
         logger.info(f"Stopping Gmail watch for user {user_id}")
@@ -590,10 +590,10 @@ def process_gmail_notification(email_address: str, history_id: str):
         logger.info(f"Creating EmailProcessor for {user_id}")
         # Ensure token is passed correctly
         token_info = user_data.get('token')
-        processor = EmailProcessor(user_id, token_info)
+        processor = EmailProcessor()
 
         logger.info(f"Processing notification for {user_id} with history_id {history_id}, last_history_id {last_history_id}")
-        result = processor.process_notification(history_id, last_history_id)
+        result = processor.process_notification(db, history_id, last_history_id)
         # Use default=str for non-serializable items like datetime
         logger.info(f"Notification processing result for {user_id}: {json.dumps(result, default=str)}")
 
@@ -688,431 +688,6 @@ def send_email_notification(user_id: str, message_data: Dict):
             logger.info(f"Notification sent successfully: {response.status_code}")
     except Exception as e:
         logger.error(f"Error sending email notification: {e}")
-
-@app.post("/test/pubsub")
-async def test_pubsub():
-    """Test endpoint to diagnose PubSub issues"""
-    from datetime import datetime
-    import base64
-    
-    try:
-        # 1. Test PubSub client initialization
-        client_status = {
-            "publisher_initialized": pubsub_service.publisher is not None,
-            "subscriber_initialized": pubsub_service.subscriber is not None,
-            "is_operational": pubsub_service.is_operational,
-            "project_id": pubsub_service.project_id,
-            "topic_name": pubsub_service.topic_name,
-            "topic_path": pubsub_service.topic_path
-        }
-        
-        # 2. Test message encoding/decoding
-        test_data = {
-            "test": "message", 
-            "timestamp": str(datetime.now()),
-            "historyId": "12345",
-            "emailAddress": "test@example.com"
-        }
-        
-        # Encode as PubSub would
-        encoded_data = base64.b64encode(json.dumps(test_data).encode()).decode()
-        
-        # Try to decode with our service
-        try:
-            decoded_data = pubsub_service.decode_message(encoded_data)
-            decode_success = True
-        except Exception as e:
-            decoded_data = {"error": str(e)}
-            decode_success = False
-        
-        # 3. Test a mock PubSub message
-        test_message = {
-            "message": {
-                "data": encoded_data,
-                "messageId": "test-message-id",
-                "publishTime": str(datetime.now())
-            },
-            "subscription": "test-subscription"
-        }
-        
-        # 4. Try to publish a test message
-        publish_result = {}
-        try:
-            # Only try to publish if client is initialized
-            if pubsub_service.publisher and pubsub_service.is_operational:
-                future = pubsub_service.publisher.publish(
-                    pubsub_service.topic_path,
-                    json.dumps(test_data).encode("utf-8")
-                )
-                publish_result = {
-                    "message_id": future.result(),
-                    "status": "published"
-                }
-            else:
-                publish_result = {
-                    "status": "skipped",
-                    "reason": "PubSub client not operational"
-                }
-        except Exception as e:
-            publish_result = {
-                "status": "error",
-                "error": str(e)
-            }
-            
-        # 5. Return comprehensive diagnostic info
-        return {
-            "environment": {
-                "project_id": os.environ.get("GOOGLE_CLOUD_PROJECT_ID"),
-                "credentials_path": os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"),
-                "base_url": BASE_URL
-            },
-            "client_status": client_status,
-            "message_test": {
-                "original": test_data,
-                "encoded": encoded_data,
-                "decoded": decoded_data,
-                "decode_success": decode_success,
-                "mock_pubsub_message": test_message
-            },
-            "publish_test": publish_result
-        }
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"Error in PubSub test: {str(e)}\n{tb}")
-        return {
-            "status": "error", 
-            "error": str(e),
-            "traceback": tb
-        }
-
-@app.post("/test/pubsub/webhook")
-async def test_pubsub_webhook(request: Request):
-    """Test endpoint to diagnose webhook processing"""
-    try:
-        # Get the raw request body
-        body = await request.json()
-        
-        # Log the complete raw message for debugging
-        print(f"DEBUG - Raw message: {json.dumps(body, indent=2)}")
-        
-        # Extract message data if it exists
-        message_data = body.get("message", {}).get("data")
-        if not message_data:
-            return {
-                "status": "warning",
-                "message": "No message data found in request",
-                "received_body": body
-            }
-        
-        # Try to decode the message
-        try:
-            decoded_data = pubsub_service.decode_message(message_data)
-            decode_success = True
-        except Exception as e:
-            decoded_data = {"error": str(e)}
-            decode_success = False
-            
-        # Return detailed diagnostic information
-        return {
-            "status": "success",
-            "received_body": body,
-            "decoded_data": decoded_data,
-            "decode_success": decode_success
-        }
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"Error in webhook test: {str(e)}\n{tb}")
-        return {
-            "status": "error",
-            "error": str(e),
-            "traceback": tb
-        }
-
-@app.get("/test/pubsub/pull")
-async def test_pubsub_pull():
-    """Test endpoint to pull messages from the PubSub subscription"""
-    try:
-        if not pubsub_service.is_operational:
-            return {
-                "status": "error",
-                "message": "PubSub service is not operational"
-            }
-            
-        # Get the subscription path
-        subscription_path = pubsub_service.subscriber.subscription_path(
-            pubsub_service.project_id, 
-            pubsub_service.subscription_name
-        )
-        
-        # Try to pull messages
-        try:
-            logger.info(f"Pulling messages from {subscription_path}")
-            response = pubsub_service.subscriber.pull(
-                request={
-                    "subscription": subscription_path,
-                    "max_messages": 10,
-                }
-            )
-            
-            # Process the received messages
-            messages = []
-            ack_ids = []
-            
-            for received_message in response.received_messages:
-                ack_ids.append(received_message.ack_id)
-                
-                # Extract message data
-                message_data = received_message.message.data
-                message_attributes = {k: v for k, v in received_message.message.attributes.items()}
-                
-                # Try to decode the message
-                try:
-                    decoded_data = base64.b64decode(message_data).decode("utf-8")
-                    json_data = json.loads(decoded_data)
-                    decode_success = True
-                except Exception as e:
-                    json_data = {"error": str(e)}
-                    decode_success = False
-                
-                messages.append({
-                    "message_id": received_message.message.message_id,
-                    "publish_time": received_message.message.publish_time.isoformat() if hasattr(received_message.message, "publish_time") else None,
-                    "attributes": message_attributes,
-                    "data": message_data.decode("utf-8") if isinstance(message_data, bytes) else message_data,
-                    "decoded_data": json_data,
-                    "decode_success": decode_success
-                })
-            
-            # Acknowledge the messages
-            if ack_ids:
-                pubsub_service.subscriber.acknowledge(
-                    request={
-                        "subscription": subscription_path,
-                        "ack_ids": ack_ids,
-                    }
-                )
-            
-            return {
-                "status": "success",
-                "message_count": len(messages),
-                "messages": messages,
-                "subscription": subscription_path
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to pull messages: {str(e)}")
-            return {
-                "status": "error",
-                "message": f"Failed to pull messages: {str(e)}",
-                "subscription": subscription_path
-            }
-            
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"Error in PubSub pull test: {str(e)}\n{tb}")
-        return {
-            "status": "error", 
-            "error": str(e),
-            "traceback": tb
-        }
-
-@app.get("/debug/gmail-watch/{email}")
-@app.post("/debug/gmail-watch/{email}")
-def debug_gmail_watch(email: str):
-    """Debug endpoint to check Gmail watch status"""
-    try:
-        # Get user data from database
-        user_data = db.get_user_data(email)
-        if not user_data:
-            return {
-                "status": "error",
-                "message": f"User {email} not found in database"
-            }
-            
-        # Check if we have a token
-        if 'token' not in user_data:
-            return {
-                "status": "error",
-                "message": f"No authentication token for {email}"
-            }
-            
-        # Create Gmail service
-        gmail_service = GmailService(email, user_data.get('token'))
-        
-        # Get watch status
-        try:
-            status = gmail_service.get_watch_status()
-            
-            # Add user data from database for debugging
-            return {
-                "status": "success",
-                "watch_status": status,
-                "user_data": {
-                    "last_history_id": user_data.get("last_history_id"),
-                    "watch_expiration": user_data.get("watch_expiration")
-                },
-                "webhook_url": f"{BASE_URL}/gmail-push-webhook"
-            }
-        except Exception as e:
-            return {
-                "status": "error",
-                "message": f"Failed to get watch status: {str(e)}"
-            }
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"Error in Gmail watch debug: {str(e)}\n{tb}")
-        return {
-            "status": "error",
-            "error": str(e)
-        }
-
-@app.post("/debug/renew-watch/{email}")
-@app.get("/debug/renew-watch/{email}")
-def debug_renew_watch(email: str):
-    """Debug endpoint to renew Gmail watch for a specific email"""
-    try:
-        # Get user data from database
-        user_data = db.get_user_data(email)
-        if not user_data:
-            return {
-                "status": "error",
-                "message": f"User {email} not found in database"
-            }
-            
-        # Check if we have a token
-        if 'token' not in user_data:
-            return {
-                "status": "error",
-                "message": f"No authentication token for {email}"
-            }
-            
-        # Create Gmail service
-        gmail_service = GmailService(email, user_data.get('token'))
-        
-        # Create webhook URL - use the specialized Gmail webhook
-        webhook_url = f"{BASE_URL}/gmail-push-webhook"
-        
-        # Start watch
-        try:
-            logger.info(f"Renewing Gmail watch for {email} with webhook URL: {webhook_url}")
-            watch_response = gmail_service.start_watch(None, webhook_url)
-            
-            # Update database
-            db.store_watch_data(
-                email,
-                watch_response.get("historyId"),
-                watch_response.get("expiration")
-            )
-            
-            # Log event
-            db.log_history_event(
-                email,
-                watch_response.get("historyId"),
-                "watch_renewed_debug",
-                {
-                    "expiration": watch_response.get("expiration"),
-                    "webhook_url": webhook_url
-                }
-            )
-            
-            return {
-                "status": "success",
-                "message": f"Renewed watch for {email}",
-                "watch_response": watch_response,
-                "webhook_url": webhook_url
-            }
-        except Exception as e:
-            logger.error(f"Failed to renew watch: {str(e)}")
-            return {
-                "status": "error",
-                "message": f"Failed to renew watch: {str(e)}"
-            }
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"Error in Gmail watch renewal: {str(e)}\n{tb}")
-        return {
-            "status": "error",
-            "error": str(e)
-        }
-
-@app.post("/debug/manual-notification/{email}")
-@app.get("/debug/manual-notification/{email}")
-def debug_manual_notification(email: str):
-    """Debug endpoint to manually trigger notification processing for an email"""
-    try:
-        # Get user data from database
-        user_data = db.get_user_data(email)
-        if not user_data:
-            return {
-                "status": "error",
-                "message": f"User {email} not found in database"
-            }
-
-        if 'token' not in user_data or not user_data['token']:
-            return {
-                "status": "error",
-                "message": f"User {email} found but has no valid authentication token"
-            }
-
-        # Get the current history ID from Gmail
-        try:
-            # Use the synchronous GmailService here as it's a direct request context
-            gmail_service_sync = GmailService(email, user_data.get('token'))
-            profile = gmail_service_sync.service.users().getProfile(userId='me').execute()
-            current_history_id = profile.get('historyId')
-
-            if not current_history_id:
-                return {
-                    "status": "error",
-                    "message": "Could not retrieve current history ID from Gmail"
-                }
-
-            # Process the notification manually by calling the processor function
-            logger.info(f"Manually processing notification for {email} with history_id: {current_history_id}")
-
-            # Call the notification processor directly
-            # Note: This runs synchronously in the request thread
-            process_gmail_notification(email, current_history_id)
-            
-            # Fetch updated user data to get the potentially new last_history_id
-            updated_user_data = db.get_user_data(email)
-
-            return {
-                "status": "success",
-                "message": f"Manual notification processing attempted for {email}",
-                "history_id_processed": current_history_id,
-                "last_history_id_after": updated_user_data.get('last_history_id') # Show result after processing
-            }
-        except Exception as e:
-             logger.error(f"Error during manual notification trigger for {email}: {str(e)}")
-             import traceback
-             logger.error(f"Traceback: {traceback.format_exc()}")
-             # Check for specific scope errors
-             error_message = str(e)
-             response = {
-                 "status": "error",
-                 "message": f"Failed to process manual notification: {error_message}"
-             }
-             if "Metadata scope doesn't allow format" in error_message:
-                 response["note"] = "The error might be related to Gmail API scopes (metadata vs full access)."
-             elif "invalid_grant" in error_message:
-                  response["note"] = "Authentication error (invalid_grant). Token might be expired or revoked."
-
-             return response
-    except Exception as e:
-        # Catch errors in the outer try related to DB access etc.
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"Error in debug_manual_notification endpoint for {email}: {str(e)}")
-        return {
-            "status": "error",
-            "message": f"Unexpected error: {str(e)}"
-        }
 
 @app.post("/gmail-push-webhook")
 async def gmail_push_webhook(request: Request, background_tasks: BackgroundTasks):
@@ -1218,154 +793,10 @@ async def gmail_push_webhook(request: Request, background_tasks: BackgroundTasks
         logger.error(f"Traceback: {traceback.format_exc()}")
         return {"status": "error", "detail": str(e)}
 
-@app.get("/debug/webhook-test")
-@app.post("/debug/webhook-test")
-def debug_webhook_test():
-    """Test endpoint to verify webhook accessibility"""
-    try:
-        # Create a unique test ID
-        test_id = str(uuid.uuid4())
-        test_url = f"{BASE_URL}/gmail-push-webhook"
-        
-        # Test 1: Can we make outbound connections?
-        try:
-            # Test with a known reliable service
-            external_test = httpx.get("https://www.google.com", timeout=5)
-            external_connectivity = True
-        except Exception as e:
-            external_connectivity = False
-            external_error = str(e)
-        
-        # Test 2: Is our ngrok/webhook URL format valid?
-        is_https = BASE_URL.startswith("https://")
-        is_ngrok = "ngrok" in BASE_URL
-        
-        # Log the test
-        logger.info(f"Webhook test {test_id}: Testing {test_url}")
-        logger.info(f"External connectivity: {external_connectivity}")
-        
-        return {
-            "status": "success",
-            "test_id": test_id,
-            "webhook_url": test_url,
-            "base_url": BASE_URL,
-            "external_connectivity": external_connectivity,
-            "url_validation": {
-                "is_https": is_https,
-                "is_ngrok": is_ngrok,
-            },
-            "notes": [
-                "Gmail requires a public HTTPS URL for webhook notifications.",
-                "If you are using ngrok, make sure it's running and the URL is current.",
-                "To confirm your webhook is accessible, try visiting your webhook URL directly in a browser.",
-                f"The full webhook URL is: {test_url}"
-            ],
-            "next_steps": [
-                "1. Try renewing your Gmail watch with /debug/renew-watch/{email}",
-                "2. Send a test email to your Gmail account",
-                "3. If notifications don't arrive, try the manual notification endpoint"
-            ]
-        }
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"Error in webhook test: {str(e)}\n{tb}")
-        return {
-            "status": "error",
-            "error": str(e)
-        }
-
-@app.get("/debug/pubsub-push-config")
-@app.post("/debug/pubsub-push-config")
-def debug_pubsub_push_config():
-    """Configure PubSub subscription to use push model instead of pull"""
-    try:
-        # Get project and subscription details
-        project_id = os.getenv("GOOGLE_CLOUD_PROJECT_ID")
-        subscription_id = "gmail-notifications-sub"  # Match your subscription name
-        
-        if not project_id:
-            return {
-                "status": "error",
-                "message": "Missing GOOGLE_CLOUD_PROJECT_ID environment variable"
-            }
-            
-        # Create a fully-qualified subscription path
-        subscription_path = f"projects/{project_id}/subscriptions/{subscription_id}"
-        push_endpoint = f"{BASE_URL}/webhook"
-        
-        # Create subscription client
-        subscriber = pubsub_v1.SubscriberClient()
-        
-        # First, check if subscription exists
-        try:
-            existing = subscriber.get_subscription(request={"subscription": subscription_path})
-            logger.info(f"Found existing subscription: {subscription_path}")
-            logger.info(f"Current config: {existing}")
-            
-            # Check if it's already configured for push
-            is_push = hasattr(existing, "push_config") and existing.push_config.push_endpoint
-            current_endpoint = existing.push_config.push_endpoint if is_push else None
-            
-            if is_push and current_endpoint == push_endpoint:
-                return {
-                    "status": "success",
-                    "message": "Subscription is already configured for push",
-                    "subscription": subscription_path,
-                    "push_endpoint": push_endpoint
-                }
-                
-        except Exception as e:
-            logger.error(f"Error checking subscription: {str(e)}")
-            return {
-                "status": "error",
-                "message": f"Error checking subscription: {str(e)}"
-            }
-            
-        # Modify subscription to use push
-        try:
-            # Create push config
-            push_config = pubsub_v1.types.PushConfig(push_endpoint=push_endpoint)
-            
-            # Update the subscription
-            subscription = subscriber.update_subscription(
-                request={
-                    "subscription": {
-                        "name": subscription_path,
-                        "push_config": push_config
-                    },
-                    "update_mask": {"paths": ["push_config"]}
-                }
-            )
-            
-            logger.info(f"Updated subscription to push mode: {subscription}")
-            subscriber.close()
-            
-            return {
-                "status": "success",
-                "message": "Successfully configured subscription for push notifications",
-                "subscription": subscription_path,
-                "push_endpoint": push_endpoint,
-                "next_steps": [
-                    "1. Renew your Gmail watch with /debug/renew-watch/{email}",
-                    "2. Send a test email to your Gmail account",
-                    "3. Check the logs for incoming push notifications"
-                ]
-            }
-        except Exception as e:
-            logger.error(f"Error updating subscription: {str(e)}")
-            return {
-                "status": "error",
-                "message": f"Error updating subscription: {str(e)}"
-            }
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"Error configuring PubSub: {str(e)}\n{tb}")
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+@app.get("/index")
+def index():
+    gmail_service = GmailService()
+    return gmail_service.indexer(db)
 
 if __name__ == "__main__":
     import uvicorn

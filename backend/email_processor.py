@@ -9,7 +9,7 @@ from gmail_service import GmailService
 class EmailProcessor:
     """Email processor for handling new messages"""
     
-    def __init__(self, user_id: str, token_data: Optional[Dict] = None):
+    def __init__(self):
         """
         Initialize the email processor
         
@@ -17,10 +17,9 @@ class EmailProcessor:
             user_id: The unique identifier for the user
             token_data: Optional cached token data
         """
-        self.user_id = user_id
-        self.gmail_service = GmailService(user_id, token_data)
+        self.gmail_service = GmailService()
         
-    def process_notification(self, history_id: str, last_history_id: Optional[str] = None) -> Dict:
+    def process_notification(self, db, history_id: str, last_history_id: Optional[str] = None) -> Dict:
         """
         Process a Gmail notification with a history ID
         
@@ -58,7 +57,7 @@ class EmailProcessor:
         for change in changes:
             if change.get("change") == "added":
                 # Process new message
-                result = self._process_new_message(change.get("messageId"))
+                result = self._process_new_message(db, change.get("messageId"))
                 processed_results.append(result)
             elif change.get("change") == "modified":
                 # Process modified message
@@ -76,7 +75,7 @@ class EmailProcessor:
             "results": processed_results
         }
     
-    def _process_new_message(self, message_id: str) -> Dict:
+    def _process_new_message(self, db, message_id: str) -> Dict:
         """
         Process a new message
         
@@ -92,12 +91,6 @@ class EmailProcessor:
                 message = self.gmail_service.get_message(message_id, format="full")
                 message_format = "full"
             except Exception as e:
-                # If full format fails, fall back to metadata
-                if "Metadata scope doesn't allow format FULL" in str(e):
-                    print(f"Falling back to metadata format due to permission restrictions: {e}")
-                    message = self.gmail_service.get_message(message_id, format="metadata")
-                    message_format = "metadata"
-                else:
                     # Re-raise if it's not a permission issue
                     raise
             
@@ -110,18 +103,38 @@ class EmailProcessor:
             else:
                 # For metadata format, use snippet
                 email_content = message.get('snippet', '[Email content not available with current permissions]')
-            
+
+            profile = self.gmail_service.service.users().getProfile(userId="me").execute()  
+            user_email = profile["emailAddress"]
+            payload = message.get("payload", {})
+            sent_from = ""
+            for header in payload["headers"]:
+                if header["name"] == 'From':
+                    sent_from = header["value"]
+            if sent_from == user_email:
+                print("SKIPPING")
+                return
+
             # Print email details to console
             self._print_email_details(headers, email_content)
+
+            #THREE CHOIECS: SPAM, REPLY, DONT REPLY
+
+            #Handle spam messages
+
+            #Handle reply messages
+            self.gmail_service.reply(db, message_id)
+
+            #Handle dont reply messages
+
             
             # Example: Check if message looks like spam (very simplistic)
-            is_spam = False
-            if 'Subject' in headers:
-                spam_keywords = ['viagra', 'lottery', 'winner', 'free money', 'investment opportunity']
-                if any(keyword in headers['Subject'].lower() for keyword in spam_keywords):
-                    is_spam = True
-                    # Apply SPAM label if detected
-                    self.gmail_service.modify_message(message_id, add_labels=['SPAM'])
+            # is_spam = False
+            # if 'Subject' in headers:
+            #     spam_keywords = ['viagra', 'lottery', 'winner', 'free money', 'investment opportunity']
+            #     if any(keyword in headers['Subject'].lower() for keyword in spam_keywords):
+            #         is_spam = True
+            #         self.gmail_service.modify_message(message_id, add_labels=['SPAM'])
             
             return {
                 "messageId": message_id,
@@ -258,16 +271,6 @@ class EmailProcessor:
                 # Extract content
                 email_content = self._extract_email_content(message)
             except Exception as e:
-                # If full format fails, fall back to metadata
-                if "Metadata scope doesn't allow format FULL" in str(e):
-                    print(f"Falling back to metadata format due to permission restrictions: {e}")
-                    message = self.gmail_service.get_message(message_id, format="metadata")
-                    message_format = "metadata"
-                    # Extract headers
-                    headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
-                    # For metadata format, use snippet
-                    email_content = message.get('snippet', '[Email content not available with current permissions]')
-                else:
                     # Re-raise if it's not a permission issue
                     raise
                     

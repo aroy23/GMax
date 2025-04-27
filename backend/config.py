@@ -9,19 +9,6 @@ if not env_loaded:
     print("Please create a .env file based on the env_example template.")
     sys.exit(1)
 
-# Check required environment variables
-required_vars = [
-    "GOOGLE_CLOUD_PROJECT_ID",
-    "SUPABASE_URL",
-    "SUPABASE_KEY"
-]
-
-missing_vars = [var for var in required_vars if not os.getenv(var)]
-if missing_vars:
-    print(f"ERROR: Missing required environment variables: {', '.join(missing_vars)}")
-    print("Please update your .env file with the required variables.")
-    sys.exit(1)
-
 # Google Cloud Project details
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT_ID")
 PUBSUB_TOPIC = f"projects/{PROJECT_ID}/topics/gmail-notifications"
@@ -42,5 +29,10 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 SUPABASE_USER_TABLE = "gmail_users"
 SUPABASE_HISTORY_TABLE = "gmail_history"
 
-# Database settings for storing user tokens and history IDs
-DB_COLLECTION = "gmail_users" 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.labels",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.readonly"
+]

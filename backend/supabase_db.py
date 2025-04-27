@@ -1,7 +1,5 @@
-import json
 from typing import Dict, Optional, List, Any
 from datetime import datetime
-import time
 from supabase import create_client, Client
 
 from config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_USER_TABLE, SUPABASE_HISTORY_TABLE
