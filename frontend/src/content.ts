@@ -247,11 +247,11 @@ if (window.location.hostname === 'mail.google.com') {
       <h2 style="color: #40e0d0; margin: 0 0 16px 0; font-size: 18px;">Email Management</h2>
       <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: rgba(10, 25, 41, 0.5); border-radius: 8px; margin-bottom: 8px; border: 1px solid rgba(64, 224, 208, 0.1);">
         <div style="flex: 1;">
-          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Auto Send Emails</div>
-          <div style="color: #a0a0a0; font-size: 14px;">Automatically send emails without confirmation</div>
+          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Auto Reply Emails</div>
+          <div style="color: #a0a0a0; font-size: 14px;">Automatically reply emails without confirmation</div>
         </div>
         <label class="toggle-switch">
-          <input type="checkbox" id="auto-send-toggle">
+          <input type="checkbox" id="auto-reply-toggle">
           <span class="toggle-slider"></span>
         </label>
       </div>
@@ -377,7 +377,7 @@ if (window.location.hostname === 'mail.google.com') {
 
   // Get references to settings controls
   const headlessSeleniumToggle = document.getElementById('headless-selenium-toggle') as HTMLInputElement;
-  const autoSendToggle = document.getElementById('auto-send-toggle') as HTMLInputElement;
+  const autoReplyToggle = document.getElementById('auto-reply-toggle') as HTMLInputElement;
   const autoSpamRecoveryToggle = document.getElementById('auto-spam-recovery-toggle') as HTMLInputElement;
   const phoneNumberInput = document.getElementById('phone-number-input') as HTMLInputElement;
   const saveSettingsButton = document.getElementById('save-settings-button') as HTMLButtonElement;
@@ -411,7 +411,7 @@ if (window.location.hostname === 'mail.google.com') {
         // Update UI with fetched settings
         if (data.settings) {
           headlessSeleniumToggle.checked = data.settings.headless_selenium || false;
-          autoSendToggle.checked = data.settings.auto_send || false;
+          autoReplyToggle.checked = data.settings.auto_reply || false;
           autoSpamRecoveryToggle.checked = data.settings.auto_spam_recovery || false;
           phoneNumberInput.value = data.settings.phone_number || '';
         }
@@ -450,7 +450,7 @@ if (window.location.hostname === 'mail.google.com') {
       // Collect settings from UI
       const settings = {
         headless_selenium: headlessSeleniumToggle.checked,
-        auto_send: autoSendToggle.checked,
+        auto_reply: autoReplyToggle.checked,
         auto_spam_recovery: autoSpamRecoveryToggle.checked,
         phone_number: phoneNumberInput.value || null,
         email: userEmail // Include email in the settings payload
@@ -523,6 +523,66 @@ if (window.location.hostname === 'mail.google.com') {
     gap: 8px;
     z-index: 9999;
   `;
+
+  // Add a drag handle to quick actions panel
+  const quickActionsDragHandle = document.createElement('div');
+  quickActionsDragHandle.style.cssText = `
+    width: 100%;
+    padding: 4px 0;
+    margin-bottom: 6px;
+    cursor: move;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    user-select: none;
+  `;
+  quickActionsDragHandle.innerHTML = `
+    <div style="width: 40px; height: 4px; background: rgba(64, 224, 208, 0.3); border-radius: 2px;"></div>
+  `;
+  quickActionsPanel.insertBefore(quickActionsDragHandle, quickActionsPanel.firstChild);
+
+  // Draggable functionality for quick actions panel
+  let quickActionsIsDragging = false;
+  let quickActionsCurrentX: number;
+  let quickActionsCurrentY: number;
+  let quickActionsInitialX: number;
+  let quickActionsInitialY: number;
+  let quickActionsXOffset = 0;
+  let quickActionsYOffset = 0;
+
+  quickActionsPanel.addEventListener('mousedown', quickActionsDragStart);
+  document.addEventListener('mousemove', quickActionsDrag);
+  document.addEventListener('mouseup', quickActionsDragEnd);
+
+  function quickActionsDragStart(e: MouseEvent) {
+    // Don't start drag if clicking on buttons
+    const target = e.target as HTMLElement;
+    if (target instanceof HTMLButtonElement || 
+        target.closest('button')) {
+      return;
+    }
+
+    quickActionsInitialX = e.clientX - quickActionsXOffset;
+    quickActionsInitialY = e.clientY - quickActionsYOffset;
+    quickActionsIsDragging = true;
+  }
+
+  function quickActionsDrag(e: MouseEvent) {
+    if (quickActionsIsDragging) {
+      e.preventDefault();
+      quickActionsCurrentX = e.clientX - quickActionsInitialX;
+      quickActionsCurrentY = e.clientY - quickActionsInitialY;
+
+      quickActionsXOffset = quickActionsCurrentX;
+      quickActionsYOffset = quickActionsCurrentY;
+
+      quickActionsPanel.style.transform = `translate3d(${quickActionsCurrentX}px, ${quickActionsCurrentY}px, 0)`;
+    }
+  }
+
+  function quickActionsDragEnd() {
+    quickActionsIsDragging = false;
+  }
 
   const retrainButton = document.createElement('button');
   retrainButton.innerHTML = `
@@ -643,8 +703,143 @@ if (window.location.hostname === 'mail.google.com') {
     }
   });
 
+  // Create rescue spam button
+  const rescueSpamButton = document.createElement('button');
+  rescueSpamButton.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-1 14H5c-.55 0-1-.45-1-1V7c0-.55.45-1 1-1h14c.55 0 1 .45 1 1v10c0 .55-.45 1-1 1z" fill="#40e0d0"/>
+        <path d="M5 8h14v2H5z" fill="#40e0d0"/>
+      </svg>
+      <span>Rescue Spam</span>
+    </div>
+  `;
+  rescueSpamButton.style.cssText = `
+    padding: 8px 16px;
+    background: rgba(64, 224, 208, 0.1);
+    color: #ffffff;
+    border: 1px solid rgba(64, 224, 208, 0.2);
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    font-size: 14px;
+    font-weight: 500;
+  `;
+
+  rescueSpamButton.addEventListener('mouseover', () => {
+    rescueSpamButton.style.background = 'rgba(64, 224, 208, 0.2)';
+    rescueSpamButton.style.borderColor = 'rgba(64, 224, 208, 0.3)';
+    rescueSpamButton.style.boxShadow = '0 0 12px rgba(64, 224, 208, 0.2)';
+  });
+
+  rescueSpamButton.addEventListener('mouseout', () => {
+    rescueSpamButton.style.background = 'rgba(64, 224, 208, 0.1)';
+    rescueSpamButton.style.borderColor = 'rgba(64, 224, 208, 0.2)';
+    rescueSpamButton.style.boxShadow = 'none';
+  });
+
+  rescueSpamButton.addEventListener('click', async () => {
+    try {
+      let auto_check = true;
+      const settings = await fetch('http://localhost:8000/settings');
+      const settingsData = await settings.json();
+      if (settingsData.settings.auto_spam_recovery) {
+        auto_check = true;
+      } else {
+        auto_check = false;
+      }
+      
+      if (auto_check) {
+        const rep = await fetch('http://localhost:8000/settings');
+        const auto_check_response = await rep.json();
+        while (auto_check_response.settings.auto_spam_recovery) {
+          addMessage('Auto Checking spam folder for legitimate emails...', 'bot', 'color: #40e0d0;');
+          const autoResponse = await fetch('http://localhost:8000/gmail/rescue-spam');
+          const auto_result = await autoResponse.json();
+            
+          if (auto_result.status === 'success') {
+            // Create a detailed message with summary
+            const summary = `Spam rescue completed! Analyzed ${auto_result.results.analyzed} emails: 
+            ✅ ${auto_result.results.rescued} rescued 
+            ⚠️ ${auto_result.results.kept_as_spam} kept as spam`;
+            
+            addMessage(summary, 'bot', 'color: #00ff9d;');
+            
+            // If emails were rescued, display details about them
+            if (auto_result.results.rescued > 0 && auto_result.results.rescued_emails && auto_result.results.rescued_emails.length > 0) {
+              // Add a small delay to separate messages
+              setTimeout(() => {
+                addMessage('Rescued emails:', 'bot', 'color: #40e0d0; font-weight: 500;');
+                // Add each rescued email with details
+                auto_result.results.rescued_emails.forEach((email: { from: string; subject: string; preview?: string }, index: number) => {
+                  const emailDetails = `${index + 1}. From: ${email.from}
+                  Subject: ${email.subject}`;              
+                  // Add with slight delay between messages for better readability
+                  setTimeout(() => {
+                    addMessage(emailDetails, 'bot', 'color: #ffffff; background: rgba(64, 224, 208, 0.1);');
+                  }, index * 200);
+                });
+              }, 300);
+            }
+          } 
+          else {
+            break; // Exit the loop if not successful
+          }
+        }
+      } else {
+        // Regular non-auto check
+        addMessage('Checking spam folder for legitimate emails...', 'bot', 'color: #40e0d0;');
+    
+        const response = await fetch('http://localhost:8000/gmail/rescue-spam');
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+          // Create a detailed message with summary
+          const summary = `Spam rescue completed! Analyzed ${result.results.analyzed} emails: 
+          ✅ ${result.results.rescued} rescued 
+          ⚠️ ${result.results.kept_as_spam} kept as spam`;
+          
+          addMessage(summary, 'bot', 'color: #00ff9d;');
+          
+          // If emails were rescued, display details about them
+          if (result.results.rescued > 0 && result.results.rescued_emails && result.results.rescued_emails.length > 0) {
+            // Add a small delay to separate messages
+            setTimeout(() => {
+              addMessage('Rescued emails:', 'bot', 'color: #40e0d0; font-weight: 500;');
+              
+              // Add each rescued email with details
+              result.results.rescued_emails.forEach((email: { from: string; subject: string; preview?: string }, index: number) => {
+                const emailDetails = `${index + 1}. From: ${email.from}
+                Subject: ${email.subject}`;              
+                // Add with slight delay between messages for better readability
+                setTimeout(() => {
+                  addMessage(emailDetails, 'bot', 'color: #ffffff; background: rgba(64, 224, 208, 0.1);');
+                }, index * 200);
+              });
+            }, 300);
+          }
+          
+          if (result.results.rescued > 0) {
+            // Wait a longer moment to show the success message and email details before refreshing
+            setTimeout(() => {
+              window.location.reload();
+            }, 1000);
+          }
+        } else {
+          addMessage(`Error during spam rescue: ${result.detail}`, 'bot', 'color: #ff4444;');
+        }
+      }
+    } catch (error) {
+      addMessage(`Failed to rescue spam: ${error}`, 'bot', 'color: #ff4444;');
+    }
+  });
+
   quickActionsPanel.appendChild(retrainButton);
   quickActionsPanel.appendChild(smartSortButton);
+  quickActionsPanel.appendChild(rescueSpamButton);
   document.body.appendChild(quickActionsPanel);
 
   // --- AI Actions Panel Logic ---
