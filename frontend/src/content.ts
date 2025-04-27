@@ -48,7 +48,7 @@ if (window.location.hostname === 'mail.google.com') {
   header.innerHTML = `
     <div style="display: flex; align-items: center; gap: 8px;">
       <div style="width: 8px; height: 8px; background: #40e0d0; border-radius: 50%; box-shadow: 0 0 12px #40e0d0;"></div>
-      <span style="font-weight: 500;">AI Email Assistant</span>
+      <span style="font-weight: 500;">GMax Assistant</span>
     </div>
     <div style="display: flex; gap: 8px;">
       <button id="settings-button" style="background: none; border: none; color: #ffffff; cursor: pointer; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: background 0.2s;">
@@ -787,7 +787,7 @@ if (window.location.hostname === 'mail.google.com') {
           // Wait a longer moment to show the success message and email details before refreshing
           setTimeout(() => {
             window.location.reload();
-          }, 1000);
+          }, 3000);
         }
       } else {
         addMessage(`Error during spam rescue: ${result.detail || 'Unknown error'}`, 'bot', 'color: #ff4444;');
