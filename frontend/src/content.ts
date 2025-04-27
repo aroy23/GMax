@@ -422,22 +422,22 @@ if (window.location.hostname === 'mail.google.com') {
       <h2 style="color: #40e0d0; margin: 0 0 16px 0; font-size: 18px;">Email Management</h2>
       <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: rgba(10, 25, 41, 0.5); border-radius: 8px; margin-bottom: 8px; border: 1px solid rgba(64, 224, 208, 0.1);">
         <div style="flex: 1;">
-          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Auto-respond to Important Emails</div>
-          <div style="color: #a0a0a0; font-size: 14px;">Automatically respond to emails marked as important</div>
+          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Auto Send Emails</div>
+          <div style="color: #a0a0a0; font-size: 14px;">Automatically send emails without confirmation</div>
         </div>
         <label class="toggle-switch">
-          <input type="checkbox" checked>
+          <input type="checkbox" id="auto-send-toggle">
           <span class="toggle-slider"></span>
         </label>
       </div>
       
       <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: rgba(10, 25, 41, 0.5); border-radius: 8px; margin-bottom: 8px; border: 1px solid rgba(64, 224, 208, 0.1);">
         <div style="flex: 1;">
-          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Smart Email Categorization</div>
-          <div style="color: #a0a0a0; font-size: 14px;">Automatically categorize incoming emails</div>
+          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Auto Spam Recovery</div>
+          <div style="color: #a0a0a0; font-size: 14px;">Automatically rescue legitimate emails from spam folder</div>
         </div>
         <label class="toggle-switch">
-          <input type="checkbox" checked>
+          <input type="checkbox" id="auto-spam-recovery-toggle">
           <span class="toggle-slider"></span>
         </label>
       </div>
@@ -447,50 +447,51 @@ if (window.location.hostname === 'mail.google.com') {
       <h2 style="color: #40e0d0; margin: 0 0 16px 0; font-size: 18px;">Automation</h2>
       <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: rgba(10, 25, 41, 0.5); border-radius: 8px; margin-bottom: 8px; border: 1px solid rgba(64, 224, 208, 0.1);">
         <div style="flex: 1;">
-          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Schedule Email Sending</div>
-          <div style="color: #a0a0a0; font-size: 14px;">Automatically schedule emails for optimal delivery times</div>
+          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Headless Mode</div>
+          <div style="color: #a0a0a0; font-size: 14px;">Run automated tasks invisibly in the background</div>
         </div>
         <label class="toggle-switch">
-          <input type="checkbox">
+          <input type="checkbox" id="headless-selenium-toggle">
           <span class="toggle-slider"></span>
         </label>
       </div>
       
       <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: rgba(10, 25, 41, 0.5); border-radius: 8px; margin-bottom: 8px; border: 1px solid rgba(64, 224, 208, 0.1);">
         <div style="flex: 1;">
-          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Follow-up Reminders</div>
-          <div style="color: #a0a0a0; font-size: 14px;">Set automatic reminders for unanswered emails</div>
+          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Phone Number</div>
+          <div style="color: #a0a0a0; font-size: 14px;">Number for SMS notifications</div>
         </div>
-        <label class="toggle-switch">
-          <input type="checkbox" checked>
-          <span class="toggle-slider"></span>
-        </label>
+        <input 
+          type="text" 
+          id="phone-number-input" 
+          placeholder="Enter phone number" 
+          style="
+            background: rgba(10, 25, 41, 0.5); 
+            border: 1px solid rgba(64, 224, 208, 0.3); 
+            color: white; 
+            padding: 8px; 
+            border-radius: 4px;
+            width: 200px;
+          "
+        >
       </div>
     </div>
 
-    <div style="margin-bottom: 32px;">
-      <h2 style="color: #40e0d0; margin: 0 0 16px 0; font-size: 18px;">Privacy & Security</h2>
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: rgba(10, 25, 41, 0.5); border-radius: 8px; margin-bottom: 8px; border: 1px solid rgba(64, 224, 208, 0.1);">
-        <div style="flex: 1;">
-          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Data Collection</div>
-          <div style="color: #a0a0a0; font-size: 14px;">Allow anonymous usage data collection</div>
-        </div>
-        <label class="toggle-switch">
-          <input type="checkbox">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: rgba(10, 25, 41, 0.5); border-radius: 8px; margin-bottom: 8px; border: 1px solid rgba(64, 224, 208, 0.1);">
-        <div style="flex: 1;">
-          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Secure Mode</div>
-          <div style="color: #a0a0a0; font-size: 14px;">Enable additional security measures</div>
-        </div>
-        <label class="toggle-switch">
-          <input type="checkbox" checked>
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
+    <div id="settings-status" style="color: #40e0d0; text-align: center; margin-top: 20px; min-height: 24px;"></div>
+    <div style="display: flex; justify-content: center; margin-top: 16px;">
+      <button 
+        id="save-settings-button" 
+        style="
+          background: rgba(64, 224, 208, 0.2); 
+          border: 1px solid rgba(64, 224, 208, 0.4); 
+          color: #40e0d0; 
+          padding: 10px 20px; 
+          border-radius: 4px; 
+          cursor: pointer; 
+          font-weight: bold;
+          transition: all 0.2s;
+        "
+      >Save Settings</button>
     </div>
   `;
 
@@ -549,11 +550,123 @@ if (window.location.hostname === 'mail.google.com') {
   settingsOverlay.appendChild(settingsContainer);
   document.body.appendChild(settingsOverlay);
 
+  // Get references to settings controls
+  const headlessSeleniumToggle = document.getElementById('headless-selenium-toggle') as HTMLInputElement;
+  const autoSendToggle = document.getElementById('auto-send-toggle') as HTMLInputElement;
+  const autoSpamRecoveryToggle = document.getElementById('auto-spam-recovery-toggle') as HTMLInputElement;
+  const phoneNumberInput = document.getElementById('phone-number-input') as HTMLInputElement;
+  const saveSettingsButton = document.getElementById('save-settings-button') as HTMLButtonElement;
+  const settingsStatus = document.getElementById('settings-status') as HTMLDivElement;
+
+  // Function to get user settings from backend
+  async function fetchSettings() {
+    try {
+      settingsStatus.textContent = 'Fetching settings...';
+      settingsStatus.style.color = '#40e0d0';
+
+      // First get the user's email from the /email endpoint
+      const emailResponse = await fetch('http://localhost:8000/email');
+      const emailData = await emailResponse.json();
+      
+      if (!emailData.email) {
+        settingsStatus.textContent = 'Error: Could not retrieve email address';
+        settingsStatus.style.color = '#ff5555';
+        return;
+      }
+
+      const userEmail = emailData.email;
+      
+      // Use the email as a query parameter
+      const response = await fetch(`http://localhost:8000/settings?email=${encodeURIComponent(userEmail)}`);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Fetched settings:', data);
+        
+        // Update UI with fetched settings
+        if (data.settings) {
+          headlessSeleniumToggle.checked = data.settings.headless_selenium || false;
+          autoSendToggle.checked = data.settings.auto_send || false;
+          autoSpamRecoveryToggle.checked = data.settings.auto_spam_recovery || false;
+          phoneNumberInput.value = data.settings.phone_number || '';
+        }
+        
+        settingsStatus.textContent = '';
+      } else {
+        const errorData = await response.json();
+        settingsStatus.textContent = `Error: ${errorData.detail || 'Failed to load settings'}`;
+        settingsStatus.style.color = '#ff5555';
+      }
+    } catch (error) {
+      console.error('Error fetching settings:', error);
+      settingsStatus.textContent = 'Error connecting to server';
+      settingsStatus.style.color = '#ff5555';
+    }
+  }
+
+  // Function to save settings to backend
+  async function saveSettings() {
+    try {
+      settingsStatus.textContent = 'Saving settings...';
+      settingsStatus.style.color = '#40e0d0';
+
+      // First get the user's email from the /email endpoint
+      const emailResponse = await fetch('http://localhost:8000/email');
+      const emailData = await emailResponse.json();
+      
+      if (!emailData.email) {
+        settingsStatus.textContent = 'Error: Could not retrieve email address';
+        settingsStatus.style.color = '#ff5555';
+        return;
+      }
+
+      const userEmail = emailData.email;
+
+      // Collect settings from UI
+      const settings = {
+        headless_selenium: headlessSeleniumToggle.checked,
+        auto_send: autoSendToggle.checked,
+        auto_spam_recovery: autoSpamRecoveryToggle.checked,
+        phone_number: phoneNumberInput.value || null,
+        email: userEmail // Include email in the settings payload
+      };
+
+      // Send settings to backend
+      const response = await fetch('http://localhost:8000/settings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(settings)
+      });
+
+      if (response.ok) {
+        settingsStatus.textContent = 'Settings saved successfully!';
+        setTimeout(() => {
+          settingsStatus.textContent = '';
+        }, 3000);
+      } else {
+        const errorData = await response.json();
+        settingsStatus.textContent = `Error: ${errorData.detail || 'Failed to save settings'}`;
+        settingsStatus.style.color = '#ff5555';
+      }
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      settingsStatus.textContent = 'Error connecting to server';
+      settingsStatus.style.color = '#ff5555';
+    }
+  }
+
+  // Add event listeners
+  saveSettingsButton.addEventListener('click', saveSettings);
+
   // Update settings button functionality
   const settingsButton = document.getElementById('settings-button');
   if (settingsButton) {
     settingsButton.addEventListener('click', () => {
       settingsOverlay.style.display = 'flex';
+      // Fetch current settings when opening settings panel
+      fetchSettings();
     });
   }
 
