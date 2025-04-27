@@ -449,29 +449,17 @@ class GmailService:
         b64 += "=" * ((4 - len(b64) % 4) % 4)
         return base64.b64decode(b64).decode("utf-8", errors="replace")
 
-    #@app.get("/reply") # /reply?original_email_id=some_id
-    def reply(self, db, original_email_id: str):
+    def reply(self, db, original_email_id: str, body: str):
         try:
             profile = self.service.users().getProfile(userId="me").execute()  
             user_email = profile["emailAddress"]
 
             user_data = db.get_user_data(user_email)
             persona = user_data.get("persona") if user_data else None
-            print("testttttt")
             if persona:
-                print("persona!")
-                # original_content = "Hello!\n\nMy name is Bob Dylan."
                 original_email = self.get_message(original_email_id)
                 payload = original_email["payload"]
-                if payload.get("body", {}).get("data"):
-                    original_body = self.gmail_body_to_text(payload["body"]["data"])
-                else:
-                    original_body = ""
-                    for part in payload.get("parts", []):
-                        if part["mimeType"] == "text/plain" and part.get("body", {}).get("data"):
-                            original_body = self.gmail_body_to_text(part["body"]["data"])
                 
-                print("another test!")
                 sent_from = 'Unknown'
                 subject = 'No Subject'
                 message_id_header = ''
@@ -485,17 +473,10 @@ class GmailService:
                     elif header["name"] == 'Message-ID':
                         message_id_header = header["value"]
 
-                email = f'\nSTART OF EMAIL\nFrom: {sent_from}\nSubject: {subject}\nBody:\n{original_body}\n'
-
-                message_content = model.generate_content(
-                    "Taking into account the sender (and their email address) and subject and body, give me a plain string response to this email below:\n\n" + email + '\n\nUse this as the persona of the responder and act as them fully:\n\n' + persona
-                )
-                print("gemini test!")
-
                 if not subject.lower().startswith("re:"):
                     subject = "Re: " + subject
                 
-                mime = MIMEText(message_content.text)
+                mime = MIMEText(body)
                 mime["To"] = sent_from
                 mime["Subject"] = subject
                 mime["In-Reply-To"] = message_id_header
@@ -511,11 +492,50 @@ class GmailService:
                     .execute()
                 )
 
-                print(send_message["id"])
+                print("Replied!", send_message["id"])
 
         except HttpError as error:
             print(f"An error occurred: {error}")
             send_message = None
+            print("Failed!")
+    
+    def draft(self, db, original_email_id: str):
+        try:
+            profile = self.service.users().getProfile(userId="me").execute()  
+            user_email = profile["emailAddress"]
+
+            user_data = db.get_user_data(user_email)
+            persona = user_data.get("persona") if user_data else None
+            if persona:
+                original_email = self.get_message(original_email_id)
+                payload = original_email["payload"]
+                if payload.get("body", {}).get("data"):
+                    original_body = self.gmail_body_to_text(payload["body"]["data"])
+                else:
+                    original_body = ""
+                    for part in payload.get("parts", []):
+                        if part["mimeType"] == "text/plain" and part.get("body", {}).get("data"):
+                            original_body = self.gmail_body_to_text(part["body"]["data"])
+                
+                for header in payload["headers"]:
+                    if header["name"] == 'From':
+                        sent_from = header["value"]
+                    elif header["name"] == 'Subject':
+                        subject = header["value"]
+
+                email = f'\nSTART OF EMAIL\nFrom: {sent_from}\nSubject: {subject}\nBody:\n{original_body}\n'
+
+                message_content = model.generate_content(
+                    "Taking into account the sender (and their email address) and subject and body, give me a plain string response to this email below:\n\n" + email + '\n\nUse this as the persona of the responder and act as them fully:\n\n' + persona
+                )
+                
+                draft = {}
+                draft["content"] = message_content.text
+                
+                return draft
+
+        except HttpError as error:
+            print(f"An error occurred: {error}")
             print("Failed!")
 
     def indexer(self, db):

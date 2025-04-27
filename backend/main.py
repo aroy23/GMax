@@ -3,7 +3,7 @@ import base64
 import os
 import asyncio
 from typing import Dict, Optional, List, Any
-from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Request, Body, Header, BackgroundTasks
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 import logging
 import threading
 import httpx
-import uuid
 from google.cloud import pubsub_v1
 
 from gmail_auth import start_oauth_flow, complete_oauth_flow
@@ -21,6 +20,9 @@ from email_processor import EmailProcessor
 from watch_scheduler import WatchScheduler
 from pubsub_service import PubSubService
 from config import TOKEN_FILE
+
+from confirmation import send_text
+from pydantic import BaseModel
 
 # Load environment variables
 load_dotenv()
@@ -797,6 +799,45 @@ async def gmail_push_webhook(request: Request, background_tasks: BackgroundTasks
 def index():
     gmail_service = GmailService()
     return gmail_service.indexer(db)
+
+@app.get("/send-text")
+def send_text_confirmation():
+    print("sending text!")
+    send_text("4082036222", "Reply YES or NO", "https://dccb-164-67-70-232.ngrok-free.app/handle-confirmation")
+    return {"status": "sent"}
+
+class SmsReply(BaseModel):
+    textId: str
+    fromNumber: str
+    text: str
+    data: str | None = None
+
+@app.post("/handle-confirmation")
+async def handle_confirmation(
+    request: Request,
+    reply: SmsReply = Body(...),
+    x_textbelt_timestamp: str = Header(..., alias="X-textbelt-timestamp"),
+    x_textbelt_signature: str = Header(..., alias="X-textbelt-signature"),
+):
+    gmail_service = GmailService()
+    profile = gmail_service.service.users().getProfile(userId="me").execute()  
+    user_email = profile["emailAddress"]
+    phone_number = db.get_user_data(user_email).get("phone_number")
+
+    reply_text = reply.text.strip().lower()
+    if reply_text == "yes":
+        confirmation = db.get_confirmation(user_email)
+        print(confirmation)
+        gmail_service.reply(db, confirmation["respond_to_message_id"], confirmation["message_content"])
+        res = send_text(phone_number, "Perfect! The reply has been sent.")
+        print(res)
+        db.delete_confirmation(user_email)
+    elif reply_text == "no":
+        res = send_text(phone_number, "Got it! This reply won't be sent.")
+        print(res)
+        db.delete_confirmation(user_email)
+
+    return {"status": "received"}
 
 if __name__ == "__main__":
     import uvicorn

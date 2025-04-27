@@ -3,8 +3,10 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 import time
 import base64
+import re
 
 from gmail_service import GmailService
+from confirmation import send_text
 
 class EmailProcessor:
     """Email processor for handling new messages"""
@@ -75,6 +77,9 @@ class EmailProcessor:
             "results": processed_results
         }
     
+    def parse_email(self, email):
+        return re.sub(r"[@\.]", lambda m: "[at]" if m.group()== "@" else "[dot]", email)
+
     def _process_new_message(self, db, message_id: str) -> Dict:
         """
         Process a new message
@@ -123,25 +128,24 @@ class EmailProcessor:
             #Handle spam messages
 
             #Handle reply messages
-            self.gmail_service.reply(db, message_id)
+            phone_number = db.get_user_data(user_email).get("phone_number")
+            draft = self.gmail_service.draft(db, message_id)
+            print(draft)
+            content = f"Hi, This is EmailBot! You have received an email:\n\nFrom: {self.parse_email(sent_from)}\n\n{email_content}\n\n-------------\n\nWould you like the following response below to be a reply? Reply YES or NO.\n\n{draft['content']}"
+            print(content)
+            res = send_text(phone_number, content)
+            print(res)
+            db.create_confirmation(user_email, message_id, draft['content'])
 
             #Handle dont reply messages
-
             
-            # Example: Check if message looks like spam (very simplistic)
-            # is_spam = False
-            # if 'Subject' in headers:
-            #     spam_keywords = ['viagra', 'lottery', 'winner', 'free money', 'investment opportunity']
-            #     if any(keyword in headers['Subject'].lower() for keyword in spam_keywords):
-            #         is_spam = True
-            #         self.gmail_service.modify_message(message_id, add_labels=['SPAM'])
             
             return {
                 "messageId": message_id,
                 "threadId": message.get("threadId"),
                 "processed": True,
                 "timestamp": datetime.now().isoformat(),
-                "action": "spam_detected" if is_spam else "inbox_kept",
+                "action": "inbox_kept",
                 "from": headers.get("From", ""),
                 "to": headers.get("To", ""),
                 "subject": headers.get("Subject", ""),

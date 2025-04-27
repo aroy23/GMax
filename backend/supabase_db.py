@@ -2,7 +2,7 @@ from typing import Dict, Optional, List, Any
 from datetime import datetime
 from supabase import create_client, Client
 
-from config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_USER_TABLE, SUPABASE_HISTORY_TABLE
+from config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_USER_TABLE, SUPABASE_HISTORY_TABLE, SUPABASE_CONFIRMATIONS_TABLE
 
 class SupabaseDB:
     """Supabase database for storing user data and Gmail history"""
@@ -201,3 +201,20 @@ class SupabaseDB:
         result = self.supabase.table(SUPABASE_USER_TABLE).select("*").not_.is_("watch_expiration", "null").execute()
         
         return result.data if result.data else [] 
+    
+    def create_confirmation(self, user_id, message_id, message_content):
+        confirmation_data = {}
+        confirmation_data["user_id"] = user_id
+        confirmation_data["respond_to_message_id"] = message_id
+        confirmation_data["message_content"] = message_content
+        self.supabase.table(SUPABASE_CONFIRMATIONS_TABLE).upsert(
+            confirmation_data
+        ).execute()
+    
+    def delete_confirmation(self, user_id):
+        self.supabase.table(SUPABASE_CONFIRMATIONS_TABLE).delete().eq("user_id", user_id).execute()
+    
+    def get_confirmation(self, user_id):
+        result = self.supabase.table(SUPABASE_CONFIRMATIONS_TABLE).select("*").eq("user_id", user_id).execute()
+        if result.data and len(result.data) > 0:
+            return result.data[0]
