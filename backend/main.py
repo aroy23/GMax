@@ -2,11 +2,11 @@ import json
 import base64
 import os
 import asyncio
-from typing import Dict, Optional, List, Any
-from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks, WebSocket
+from typing import Dict, Optional, List, Any, Union
+from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks, WebSocket, Header
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from dotenv import load_dotenv
 import logging
 import threading
@@ -279,6 +279,47 @@ class EmailContent(BaseModel):
     sender: str
     date: str
     content: str
+
+class UserSettings(BaseModel):
+    headless_selenium: bool = True
+    phone_number: Optional[str] = None
+    auto_send: bool = False
+    auto_spam_recovery: bool = False
+
+class UserSettingsUpdate(BaseModel):
+    headless_selenium: Optional[bool] = None
+    phone_number: Optional[str] = None
+    auto_send: Optional[bool] = None
+    auto_spam_recovery: Optional[bool] = None
+
+class UserSettingsResponse(BaseModel):
+    settings: UserSettings
+
+# Token authentication dependency
+async def get_user_from_token(authorization: str = Header(...)):
+    """
+    Extract user information from token in the Authorization header
+    
+    Token should be in the format: "Bearer <token>"
+    """
+    try:
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Invalid or missing token")
+        
+        token = authorization.replace("Bearer ", "")
+        # Get user data based on token
+        user_data = db.get_user_by_token(token)
+        
+        if not user_data:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+        # Include the raw token in the user data for later use
+        user_data["_raw_token"] = token
+            
+        return user_data
+    except Exception as e:
+        logger.error(f"Error authenticating with token: {str(e)}")
+        raise HTTPException(status_code=401, detail="Authentication failed")
 
 @app.get("/")
 def root():
@@ -988,6 +1029,54 @@ async def rescue_misclassified_spam(
     except Exception as e:
         logger.error(f"Error rescuing spam: {str(e)}")
         return {"status": "error", "message": str(e)}
+
+@app.get("/settings")
+async def get_user_settings(user_data: dict = Depends(get_user_from_token)):
+    """Get the authenticated user's settings"""
+    try:
+        # Get settings from user data or create default settings
+        settings = user_data.get('settings', {}) or {}
+        
+        # Apply default values for any missing settings
+        default_settings = UserSettings().dict()
+        for key, value in default_settings.items():
+            if key not in settings:
+                settings[key] = value
+        
+        return {"settings": settings}
+    except Exception as e:
+        logger.error(f"Error retrieving user settings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/settings")
+async def update_user_settings(
+    settings_update: UserSettingsUpdate,
+    user_data: dict = Depends(get_user_from_token)
+):
+    """Update the authenticated user's settings"""
+    try:
+        # Get the raw token from the user data
+        token = user_data.get("_raw_token")
+        if not token:
+            raise HTTPException(status_code=500, detail="Token not found in user data")
+        
+        # Get existing settings or create empty dict
+        current_settings = user_data.get('settings', {}) or {}
+        
+        # Update only the fields that are provided
+        update_dict = {k: v for k, v in settings_update.dict().items() if v is not None}
+        current_settings.update(update_dict)
+        
+        # Save updated settings to database using token
+        updated_data = db.update_user_by_token(token, {"settings": current_settings})
+        
+        if not updated_data:
+            raise HTTPException(status_code=500, detail="Failed to update settings")
+        
+        return {"settings": updated_data.get("settings", {})}
+    except Exception as e:
+        logger.error(f"Error updating user settings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
