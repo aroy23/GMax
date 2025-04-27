@@ -21,6 +21,7 @@ from email_processor import EmailProcessor
 from watch_scheduler import WatchScheduler
 from pubsub_service import PubSubService
 from config import TOKEN_FILE
+from gmail_login import run_gmail_automation
 
 # Load environment variables
 load_dotenv()
@@ -797,6 +798,16 @@ async def gmail_push_webhook(request: Request, background_tasks: BackgroundTasks
 def index():
     gmail_service = GmailService()
     return gmail_service.indexer(db)
+
+@app.get("/gmail/automate")
+def run_gmail_automation_route():
+    """Run the Gmail automation script"""
+    try:
+        result = run_gmail_automation()
+        return result
+    except Exception as e:
+        logger.error(f"Error running Gmail automation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
