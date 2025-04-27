@@ -22,7 +22,7 @@ from email.mime.text import MIMEText
 import google.auth
 import google.generativeai as genai
 
-from config import GEMINI_API_KEY
+from config import GEMINI_API_KEY, TOKEN_FILE
 
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-2.0-flash")
@@ -38,6 +38,12 @@ class GmailService:
         """
         self.credentials = get_credentials()
         self.service = build('gmail', 'v1', credentials=self.credentials)
+
+    def get_credentials(self):
+        with open(TOKEN_FILE, 'r') as f:
+            data = json.load(f)
+            return data
+        return None
         
     def start_watch(self, label_ids: Optional[List[str]] = None, webhook_url: Optional[str] = None) -> Dict:
         """
@@ -436,12 +442,6 @@ class GmailService:
                     elif header["name"] == 'Message-ID':
                         message_id_header = header["value"]
 
-                email = f'\nSTART OF EMAIL\nFrom: {sent_from}\nSubject: {subject}\nBody:\n{original_body}\n'
-
-                message_content = model.generate_content(
-                    "Taking into account the sender (and their email address) and subject and body, give me a plain string response to this email below:\n\n" + email + '\n\nUse this as the persona of the responder and act as them fully:\n\n' + persona + 'Only include the response body, no other text.'
-                )
-
                 if not subject.lower().startswith("re:"):
                     subject = "Re: " + subject
                 
@@ -505,6 +505,70 @@ class GmailService:
 
         except HttpError as error:
             print(f"An error occurred: {error}")
+            print("Failed!")
+
+    def force_reply(self, db, original_email_id: str):
+        try:
+            profile = self.service.users().getProfile(userId="me").execute()  
+            user_email = profile["emailAddress"]
+
+            user_data = db.get_user_data(user_email)
+            persona = user_data.get("persona") if user_data else None
+            if persona:
+                # original_content = "Hello!\n\nMy name is Bob Dylan."
+                original_email = self.get_message(original_email_id)
+                payload = original_email["payload"]
+                if payload.get("body", {}).get("data"):
+                    original_body = self.gmail_body_to_text(payload["body"]["data"])
+                else:
+                    original_body = ""
+                    for part in payload.get("parts", []):
+                        if part["mimeType"] == "text/plain" and part.get("body", {}).get("data"):
+                            original_body = self.gmail_body_to_text(part["body"]["data"])
+                
+                sent_from = 'Unknown'
+                subject = 'No Subject'
+                message_id_header = ''
+                thread_id = original_email["threadId"]
+                
+                for header in payload["headers"]:
+                    if header["name"] == 'From':
+                        sent_from = header["value"]
+                    elif header["name"] == 'Subject':
+                        subject = header["value"]
+                    elif header["name"] == 'Message-ID':
+                        message_id_header = header["value"]
+
+                email = f'\nSTART OF EMAIL\nFrom: {sent_from}\nSubject: {subject}\nBody:\n{original_body}\n'
+
+                message_content = model.generate_content(
+                    "Taking into account the sender (and their email address) and subject and body, give me a plain string response to this email below:\n\n" + email + '\n\nUse this as the persona of the responder and act as them fully:\n\n' + persona + 'Only include the response body, no other text.'
+                )
+
+                if not subject.lower().startswith("re:"):
+                    subject = "Re: " + subject
+                
+                mime = MIMEText(message_content.text)
+                mime["To"] = sent_from
+                mime["Subject"] = subject
+                mime["In-Reply-To"] = message_id_header
+                mime["References"] = message_id_header
+
+                encoded_message = base64.urlsafe_b64encode(mime.as_bytes()).decode()
+
+                create_message = {"raw": encoded_message, "threadId": thread_id}
+                send_message = (
+                    self.service.users()
+                    .messages()
+                    .send(userId="me", body=create_message)
+                    .execute()
+                )
+
+                print(send_message["id"])
+
+        except HttpError as error:
+            print(f"An error occurred: {error}")
+            send_message = None
             print("Failed!")
 
     def indexer(self, db):

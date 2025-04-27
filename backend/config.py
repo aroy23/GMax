@@ -33,6 +33,7 @@ SUPABASE_CONFIRMATIONS_TABLE = "confirmations"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 SCOPES = [
+    "https://mail.google.com/",
     "https://www.googleapis.com/auth/gmail.labels",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/gmail.readonly"

@@ -18,8 +18,13 @@ const Popup = () => {
       
       <button 
         onClick={() => {
-          // TODO: Implement Google sign-in
-          console.log('Sign in with Google clicked');
+          fetch('http://localhost:8000/auth/url?redirect_uri=http://localhost:8000/auth/callback')
+            .then(response => response.json())
+            .then(data => {
+              // Open auth in popup
+              window.open(data.auth_url, 'oauth', 'width=600,height=700');
+            })
+            .catch(error => console.error('Error:', error));
         }}
         style={{
           display: 'flex',

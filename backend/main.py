@@ -4,6 +4,7 @@ import os
 import asyncio
 from fastapi import FastAPI, HTTPException, Depends, Request, Body, Header, BackgroundTasks, WebSocket
 from typing import Dict, Optional, List, Any, Union
+from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks, WebSocket, Header, Query
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
@@ -36,6 +37,7 @@ load_dotenv()
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 # Get notification webhook URL from environment variable or use None
 NOTIFICATION_WEBHOOK_URL = os.getenv("NOTIFICATION_WEBHOOK_URL")
+EMAIL = os.getenv("GMAIL_EMAIL")
 
 # Configure logging
 logging.basicConfig(
@@ -293,6 +295,7 @@ class UserSettingsUpdate(BaseModel):
     phone_number: Optional[str] = None
     auto_send: Optional[bool] = None
     auto_spam_recovery: Optional[bool] = None
+    email: Optional[EmailStr] = None  # Added email field for authentication
 
 class UserSettingsResponse(BaseModel):
     settings: UserSettings
@@ -343,7 +346,6 @@ def get_auth_url(redirect_uri: str, user_id: Optional[str] = None, force_consent
         # Use user_id as state parameter to track through OAuth flow
         auth_url = start_oauth_flow(
             redirect_uri, 
-            state=user_id,
             force_consent=force_consent
         )
         return {"auth_url": auth_url}
@@ -361,77 +363,44 @@ async def auth_callback(request: Request):
             code = params.get("code")
             # Use the exact same redirect_uri that was used in the initial request
             redirect_uri = "http://localhost:8000/auth/callback"
-            # Get user_id from state parameter
-            state = params.get("state")
-            user_id = state
-            
-            logger.info(f"Received OAuth callback GET with state: {state}")
-            
+                        
             if not code:
                 logger.error("Missing authorization code in callback")
                 raise HTTPException(status_code=400, detail="Missing authorization code")
-            if not user_id:
-                logger.error("Missing user_id (state parameter) in callback")
-                raise HTTPException(status_code=400, detail="Missing user_id (state parameter)")
         # For POST requests, use the existing structure
         else:
             data = await request.json()
             code = data.get("code")
             redirect_uri = data.get("redirect_uri")
-            user_id = data.get("user_id")
             
-            logger.info(f"Received OAuth callback POST for user_id: {user_id}")
             
         logger.info(f"Processing OAuth callback with code: {code[:10] if code else 'None'}... and redirect_uri: {redirect_uri}")
         
         try:
             # First, remove any existing token files for this user
-            token_file = f"{user_id}_token.json"
+            token_file = "token.json"
             if os.path.exists(token_file):
-                try:
-                    os.remove(token_file)
-                    logger.info(f"Removed existing token file for {user_id}")
-                except Exception as e:
-                    logger.warning(f"Could not remove existing token file: {e}")
+               return {"status": "success", "message": "Token already exists"}
             
             # Complete the OAuth flow to get a new token
             token_data = complete_oauth_flow(
                 code, 
                 redirect_uri, 
-                user_id
             )
             
-            # Extract the email from the token data (which is now added by the complete_oauth_flow function)
-            email = token_data.get('email', user_id)
-            
-            # Verify the token has the full access scope
-            scopes = token_data.get('scopes', [])
-            has_full_access = "https://mail.google.com/" in scopes
-            
-            if not has_full_access:
-                logger.warning(f"Token does not have full Gmail access. Scopes: {scopes}")
-                # We'll still proceed, but log a warning
-            
             # Store the token in the database using the email as the user identifier
-            db.store_token(email, token_data)
-            logger.info(f"Successfully stored token for {email} in database")
             
             # For GET requests, redirect to a confirmation page
             if request.method == "GET":
-                success_url = f"{BASE_URL}/?auth_success=true&user_id={email}"
+                success_url = f"{BASE_URL}/?auth_success=true"
                 logger.info(f"Auth successful, redirecting to: {success_url}")
                 return RedirectResponse(url=success_url)
             
             # For POST requests, return JSON
-            return {"authenticated": True, "user_id": email, "has_full_access": has_full_access}
+            return {"authenticated": True}
         except Exception as oauth_error:
             logger.error(f"OAuth completion error: {str(oauth_error)}")
             error_message = str(oauth_error)
-            
-            # Handle scope mismatch errors specially
-            if "Scope has changed" in error_message:
-                logger.warning("Scope mismatch detected. This may be due to inconsistent GMAIL_SCOPES configuration.")
-                logger.warning("Check config.py to ensure GMAIL_SCOPES match what's being used in the OAuth flow.")
             
             if request.method == "GET":
                 error_url = f"{BASE_URL}/?auth_error=true&error={error_message}"
@@ -890,7 +859,7 @@ async def handle_confirmation(
     gmail_service = GmailService()
     profile = gmail_service.service.users().getProfile(userId="me").execute()  
     user_email = profile["emailAddress"]
-    phone_number = db.get_user_data(user_email).get("phone_number")
+    phone_number = db.get_user_data(user_email).get("settings", {}).get("phone_number")
 
     reply_text = reply.text.strip().lower()
     if reply_text == "yes":
@@ -912,7 +881,8 @@ async def run_gmail_automation_route():
     """Run the Gmail automation script"""
     try:
         # Run the automation in a background task
-        result = await asyncio.to_thread(run_gmail_automation)
+        headless_bool = db.get_user_data(EMAIL).get("settings", {}).get("headless_selenium", True)
+        result = await asyncio.to_thread(run_gmail_automation, headless=headless_bool)
         return result
     except Exception as e:
         logger.error(f"Error running Gmail automation: {str(e)}")
@@ -1044,10 +1014,11 @@ async def rescue_misclassified_spam(
                 results["kept_as_spam"] += 1
                 logger.info(f"Confirmed spam: {subject} from {sender}")
         
+        
         # If periodic check is requested, schedule another check in 24 hours
-        if periodic_check:
+        if db.get_user_data(EMAIL).get("settings", {}).get("auto_spam_recovery", False):
             async def schedule_next_check():
-                await asyncio.sleep(24 * 60 * 60)  # 24 hours in seconds
+                await asyncio.sleep(10)  # 10 seconds seconds
                 logger.info("Running scheduled spam rescue check")
                 # Run the rescue operation again with the same parameters
                 await rescue_misclassified_spam(background_tasks, max_emails, True)
@@ -1066,9 +1037,16 @@ async def rescue_misclassified_spam(
         return {"status": "error", "message": str(e)}
 
 @app.get("/settings")
-async def get_user_settings(user_data: dict = Depends(get_user_from_token)):
-    """Get the authenticated user's settings"""
+async def get_user_settings(email: str = Query(...)):
+    """Get user settings by email"""
     try:
+        # Get user data by email
+        user_data = db.get_user_data(email)
+        if not user_data:
+            # Create new user if not found
+            user_data = db.save_user_data(email, {})
+            user_data = db.get_user_data(email) or {}
+        
         # Get settings from user data or create default settings
         settings = user_data.get('settings', {}) or {}
         
@@ -1084,26 +1062,30 @@ async def get_user_settings(user_data: dict = Depends(get_user_from_token)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/settings")
-async def update_user_settings(
-    settings_update: UserSettingsUpdate,
-    user_data: dict = Depends(get_user_from_token)
-):
-    """Update the authenticated user's settings"""
+async def update_user_settings(settings_update: UserSettingsUpdate):
+    """Update user settings"""
     try:
-        # Get the raw token from the user data
-        token = user_data.get("_raw_token")
-        if not token:
-            raise HTTPException(status_code=500, detail="Token not found in user data")
+        # Get email from the settings update
+        email = settings_update.dict().get('email')
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+        
+        # Get user data by email
+        user_data = db.get_user_data(email)
+        if not user_data:
+            # Create new user if not found
+            user_data = db.save_user_data(email, {})
+            user_data = db.get_user_data(email) or {}
         
         # Get existing settings or create empty dict
         current_settings = user_data.get('settings', {}) or {}
         
-        # Update only the fields that are provided
-        update_dict = {k: v for k, v in settings_update.dict().items() if v is not None}
+        # Update only the settings fields (not email)
+        update_dict = {k: v for k, v in settings_update.dict().items() if v is not None and k != 'email'}
         current_settings.update(update_dict)
         
-        # Save updated settings to database using token
-        updated_data = db.update_user_by_token(token, {"settings": current_settings})
+        # Save updated settings to database
+        updated_data = db.update_user_data(email, {"settings": current_settings})
         
         if not updated_data:
             raise HTTPException(status_code=500, detail="Failed to update settings")
@@ -1112,6 +1094,10 @@ async def update_user_settings(
     except Exception as e:
         logger.error(f"Error updating user settings: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/email")
+def get_email():
+    return {"email": EMAIL}
 
 if __name__ == "__main__":
     import uvicorn
