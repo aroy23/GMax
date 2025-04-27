@@ -519,6 +519,9 @@ class GmailService:
             profile = self.service.users().getProfile(userId="me").execute()  
             user_email = profile["emailAddress"]
 
+            # Check if user exists in database
+            existing_user = db.get_user_data(user_email)
+            
             request = self.service.users().messages().list(
                 userId="me",
                 q='in:sent after:2024/04/01 before:2025/04/30'
@@ -536,7 +539,6 @@ class GmailService:
                     ).execute()
                     messages.append(msg)
 
-                # if there’s another page, prepare the next request
                 request = self.service.users().messages().list_next(request, response)
 
             selected_messages = messages if len(messages) <= 5 else random.sample(messages, 5)
@@ -568,7 +570,15 @@ class GmailService:
             )
             
             persona = persona_response.text
-            db.update_user_data(user_email, { "persona": persona })
+            
+            if existing_user:
+                # Update existing user's persona
+                db.update_user_data(user_email, { "persona": persona })
+                print("Updated existing user's persona")
+            else:
+                # Create new user with persona
+                db.save_user_data(user_email, { "persona": persona })
+                print("Created new user with persona")
 
             return {"Status": "Success!"}
         
