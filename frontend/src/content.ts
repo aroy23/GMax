@@ -743,118 +743,50 @@ if (window.location.hostname === 'mail.google.com') {
 
   rescueSpamButton.addEventListener('click', async () => {
     try {
-      // First get the user's email from the /email endpoint
-      const emailResponse = await fetch('http://localhost:8000/email');
-      const emailData = await emailResponse.json();
-      const userEmail = emailData.email;
+      addMessage('Checking spam folder for legitimate emails...', 'bot', 'color: #40e0d0;');
+  
+      const response = await fetch('http://localhost:8000/gmail/rescue-spam');
+      const result = await response.json();
       
-      // Use the email as a query parameter
-      const settingsResponse = await fetch(`http://localhost:8000/settings?email=${encodeURIComponent(userEmail)}`);
-      const settingsData = await settingsResponse.json();
-      
-      if (settingsData.settings.auto_spam_recovery) {
-        // Auto recovery mode with maximum iterations and delay
-        addMessage('Auto checking spam folder for legitimate emails...', 'bot', 'color: #40e0d0;');
-        let maxIterations = 20; // Prevent infinite loop
-        let iterationCount = 0;
+      if (result.status === 'success') {
+        // Create a detailed message with summary
+        const summary = `Spam rescue completed! Analyzed ${result.results.analyzed} emails: 
+        ✅ ${result.results.rescued} rescued 
+        ⚠️ ${result.results.kept_as_spam} kept as spam`;
         
-        while (true) {
-          // Check if we've hit the maximum iterations
-          if (iterationCount >= maxIterations) {
-            addMessage('Maximum auto-check iterations reached.', 'bot', 'color: #ffaa00;');
-            break;
-          }
-          
-          // Get the latest settings to check if auto-recovery is still enabled
-          const latestSettingsResponse = await fetch(`http://localhost:8000/settings?email=${encodeURIComponent(userEmail)}`);
-          const latestSettings = await latestSettingsResponse.json();
-          
-          // Break if auto recovery is disabled
-          if (!latestSettings.settings.auto_spam_recovery) {
-            addMessage('Auto spam recovery turned off.', 'bot', 'color: #40e0d0;');
-            break;
-          }
-          
-          // Process spam emails
-          const autoResponse = await fetch('http://localhost:8000/gmail/rescue-spam');
-          const autoResult = await autoResponse.json();
+        addMessage(summary, 'bot', 'color: #00ff9d;');
+        
+        // If emails were rescued, display details about them
+        if (result.results.rescued > 0 && result.results.rescued_emails && result.results.rescued_emails.length > 0) {
+          // Add a small delay to separate messages
+          setTimeout(() => {
+            addMessage('Rescued emails:', 'bot', 'color: #40e0d0; font-weight: 500;');
             
-          if (autoResult.status === 'success') {
-            // If emails were rescued, display details about them
-            if (autoResult.results.rescued > 0 && autoResult.results.rescued_emails && autoResult.results.rescued_emails.length > 0) {
-              // Add a small delay to separate messages
+            // Add each rescued email with details
+            result.results.rescued_emails.forEach((email: { from: string; subject: string; preview?: string }, index: number) => {
+              const emailDetails = `${index + 1}. From: ${email.from}
+              Subject: ${email.subject}`;              
+              // Add with slight delay between messages for better readability
               setTimeout(() => {
-                addMessage('Rescued emails:', 'bot', 'color: #40e0d0; font-weight: 500;');
-                // Add each rescued email with details
-                autoResult.results.rescued_emails.forEach((email: { from: string; subject: string; preview?: string }, index: number) => {
-                  const emailDetails = `${index + 1}. From: ${email.from}
-                  Subject: ${email.subject}`;              
-                  // Add with slight delay between messages for better readability
-                  setTimeout(() => {
-                    addMessage(emailDetails, 'bot', 'color: #ffffff; background: rgba(64, 224, 208, 0.1);');
-                  }, index * 200);
-                });
-              }, 300);
-            } else {
-              addMessage('No new legitimate emails found in spam.', 'bot', 'color: #40e0d0;');
-            }
-          } else {
-            addMessage(`Error during auto spam rescue: ${autoResult.detail || 'Unknown error'}`, 'bot', 'color: #ff4444;');
-            break; // Exit the loop if not successful
-          }
-          
-          iterationCount++;
-          
-          // Add delay between iterations
-          await new Promise(resolve => setTimeout(resolve, 5000));
+                addMessage(emailDetails, 'bot', 'color: #ffffff; background: rgba(64, 224, 208, 0.1);');
+              }, index * 200);
+            });
+          }, 300);
+        }
+        
+        if (result.results.rescued > 0) {
+          // Wait a longer moment to show the success message and email details before refreshing
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
         }
       } else {
-        // Regular non-auto check
-        addMessage('Checking spam folder for legitimate emails...', 'bot', 'color: #40e0d0;');
-    
-        const response = await fetch('http://localhost:8000/gmail/rescue-spam');
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-          // Create a detailed message with summary
-          const summary = `Spam rescue completed! Analyzed ${result.results.analyzed} emails: 
-          ✅ ${result.results.rescued} rescued 
-          ⚠️ ${result.results.kept_as_spam} kept as spam`;
-          
-          addMessage(summary, 'bot', 'color: #00ff9d;');
-          
-          // If emails were rescued, display details about them
-          if (result.results.rescued > 0 && result.results.rescued_emails && result.results.rescued_emails.length > 0) {
-            // Add a small delay to separate messages
-            setTimeout(() => {
-              addMessage('Rescued emails:', 'bot', 'color: #40e0d0; font-weight: 500;');
-              
-              // Add each rescued email with details
-              result.results.rescued_emails.forEach((email: { from: string; subject: string; preview?: string }, index: number) => {
-                const emailDetails = `${index + 1}. From: ${email.from}
-                Subject: ${email.subject}`;              
-                // Add with slight delay between messages for better readability
-                setTimeout(() => {
-                  addMessage(emailDetails, 'bot', 'color: #ffffff; background: rgba(64, 224, 208, 0.1);');
-                }, index * 200);
-              });
-            }, 300);
-          }
-          
-          if (result.results.rescued > 0) {
-            // Wait a longer moment to show the success message and email details before refreshing
-            setTimeout(() => {
-              window.location.reload();
-            }, 1000);
-          }
-        } else {
-          addMessage(`Error during spam rescue: ${result.detail || 'Unknown error'}`, 'bot', 'color: #ff4444;');
-        }
+        addMessage(`Error during spam rescue: ${result.detail || 'Unknown error'}`, 'bot', 'color: #ff4444;');
       }
     } catch (error) {
-      addMessage(`Failed to rescue spam: ${error}`, 'bot', 'color: #ff4444;');
-    }
-  });
+    addMessage(`Failed to rescue spam: ${error}`, 'bot', 'color: #ff4444;');
+  }
+});
 
   quickActionsPanel.appendChild(retrainButton);
   quickActionsPanel.appendChild(smartSortButton);

@@ -1018,7 +1018,7 @@ async def rescue_misclassified_spam(
         # If periodic check is requested, schedule another check in 24 hours
         if db.get_user_data(EMAIL).get("settings", {}).get("auto_spam_recovery", False):
             async def schedule_next_check():
-                await asyncio.sleep(10)  # 10 seconds seconds
+                await asyncio.sleep(24 * 60 * 60)  # 10 seconds seconds
                 logger.info("Running scheduled spam rescue check")
                 # Run the rescue operation again with the same parameters
                 await rescue_misclassified_spam(background_tasks, max_emails, True)
