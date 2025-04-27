@@ -247,11 +247,11 @@ if (window.location.hostname === 'mail.google.com') {
       <h2 style="color: #40e0d0; margin: 0 0 16px 0; font-size: 18px;">Email Management</h2>
       <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: rgba(10, 25, 41, 0.5); border-radius: 8px; margin-bottom: 8px; border: 1px solid rgba(64, 224, 208, 0.1);">
         <div style="flex: 1;">
-          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Auto Send Emails</div>
-          <div style="color: #a0a0a0; font-size: 14px;">Automatically send emails without confirmation</div>
+          <div style="font-weight: 500; margin-bottom: 4px; color: #ffffff;">Auto Reply Emails</div>
+          <div style="color: #a0a0a0; font-size: 14px;">Automatically reply emails without confirmation</div>
         </div>
         <label class="toggle-switch">
-          <input type="checkbox" id="auto-send-toggle">
+          <input type="checkbox" id="auto-reply-toggle">
           <span class="toggle-slider"></span>
         </label>
       </div>
@@ -643,8 +643,96 @@ if (window.location.hostname === 'mail.google.com') {
     }
   });
 
+  // Create rescue spam button
+  const rescueSpamButton = document.createElement('button');
+  rescueSpamButton.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-1 14H5c-.55 0-1-.45-1-1V7c0-.55.45-1 1-1h14c.55 0 1 .45 1 1v10c0 .55-.45 1-1 1z" fill="#40e0d0"/>
+        <path d="M5 8h14v2H5z" fill="#40e0d0"/>
+      </svg>
+      <span>Rescue Spam</span>
+    </div>
+  `;
+  rescueSpamButton.style.cssText = `
+    padding: 8px 16px;
+    background: rgba(64, 224, 208, 0.1);
+    color: #ffffff;
+    border: 1px solid rgba(64, 224, 208, 0.2);
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    font-size: 14px;
+    font-weight: 500;
+  `;
+
+  rescueSpamButton.addEventListener('mouseover', () => {
+    rescueSpamButton.style.background = 'rgba(64, 224, 208, 0.2)';
+    rescueSpamButton.style.borderColor = 'rgba(64, 224, 208, 0.3)';
+    rescueSpamButton.style.boxShadow = '0 0 12px rgba(64, 224, 208, 0.2)';
+  });
+
+  rescueSpamButton.addEventListener('mouseout', () => {
+    rescueSpamButton.style.background = 'rgba(64, 224, 208, 0.1)';
+    rescueSpamButton.style.borderColor = 'rgba(64, 224, 208, 0.2)';
+    rescueSpamButton.style.boxShadow = 'none';
+  });
+
+  rescueSpamButton.addEventListener('click', async () => {
+    try {
+      addMessage('Checking spam folder for legitimate emails...', 'bot', 'color: #40e0d0;');
+      
+      const response = await fetch('http://localhost:8000/gmail/rescue-spam');
+      const result = await response.json();
+      
+      if (result.status === 'success') {
+        // Create a detailed message with summary
+        const summary = `Spam rescue completed! Analyzed ${result.results.analyzed} emails: 
+        ✅ ${result.results.rescued} rescued 
+        ⚠️ ${result.results.kept_as_spam} kept as spam`;
+        
+        addMessage(summary, 'bot', 'color: #00ff9d;');
+        
+        // If emails were rescued, display details about them
+        if (result.results.rescued > 0 && result.results.rescued_emails && result.results.rescued_emails.length > 0) {
+          // Add a small delay to separate messages
+          setTimeout(() => {
+            addMessage('Rescued emails:', 'bot', 'color: #40e0d0; font-weight: 500;');
+            
+            // Add each rescued email with details
+            result.results.rescued_emails.forEach((email: { from: string; subject: string; preview?: string }, index: number) => {
+              const emailDetails = `${index + 1}. From: ${email.from}
+              Subject: ${email.subject}
+              Preview: ${email.preview?.substring(0, 60)}${email.preview && email.preview.length > 60 ? '...' : ''}`;
+              
+              // Add with slight delay between messages for better readability
+              setTimeout(() => {
+                addMessage(emailDetails, 'bot', 'color: #ffffff; background: rgba(64, 224, 208, 0.1);');
+              }, index * 200);
+            });
+          }, 300);
+        }
+        
+        if (result.refresh) {
+          // Wait a longer moment to show the success message and email details before refreshing
+          setTimeout(() => {
+            window.location.reload();
+          }, 2000 + (result.results.rescued_emails?.length || 0) * 200);
+        }
+      } else {
+        addMessage(`Error during spam rescue: ${result.detail}`, 'bot', 'color: #ff4444;');
+      }
+    } catch (error) {
+      addMessage(`Failed to rescue spam: ${error}`, 'bot', 'color: #ff4444;');
+    }
+  });
+
   quickActionsPanel.appendChild(retrainButton);
   quickActionsPanel.appendChild(smartSortButton);
+  quickActionsPanel.appendChild(rescueSpamButton);
   document.body.appendChild(quickActionsPanel);
 
   // --- AI Actions Panel Logic ---
