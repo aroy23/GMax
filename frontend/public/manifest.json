@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Email Bot",
+  "name": "GMax",
   "version": "0.0.1",
   "description": "Organize your inbox effortlessly. EmailBot auto-labels, detects new emails, and learns your writing style to draft intelligent replies — all in your tone.",
   "icons": {

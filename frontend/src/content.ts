@@ -240,7 +240,7 @@ if (window.location.hostname === 'mail.google.com') {
   settingsContainer.innerHTML = `
     <h1 style="margin: 0 0 24px 0; display: flex; align-items: center; gap: 8px; color: #ffffff;">
       <span style="width: 8px; height: 8px; background: #40e0d0; border-radius: 50%; box-shadow: 0 0 12px #40e0d0;"></span>
-      Email Bot Settings
+      GMax Settings
     </h1>
     
     <div style="margin-bottom: 32px;">

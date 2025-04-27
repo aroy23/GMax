@@ -13,7 +13,7 @@ const GoogleLogo = () => (
 const Popup = () => {
   return (
     <div style={{ width: '300px', padding: '16px' }}>
-      <h1>Email Bot</h1>
+      <h1>GMax</h1>
       <p>Sign in to get started!</p>
       
       <button 
