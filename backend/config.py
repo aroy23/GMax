@@ -28,6 +28,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 SUPABASE_USER_TABLE = "gmail_users"
 SUPABASE_HISTORY_TABLE = "gmail_history"
+SUPABASE_CONFIRMATIONS_TABLE = "confirmations"
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 

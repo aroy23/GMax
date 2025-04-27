@@ -2,6 +2,7 @@ import json
 import base64
 import os
 import asyncio
+from fastapi import FastAPI, HTTPException, Depends, Request, Body, Header, BackgroundTasks, WebSocket
 from typing import Dict, Optional, List, Any, Union
 from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks, WebSocket, Header, Query
 from fastapi.responses import RedirectResponse
@@ -11,7 +12,6 @@ from dotenv import load_dotenv
 import logging
 import threading
 import httpx
-import uuid
 from google.cloud import pubsub_v1
 from datetime import datetime
 from google.generativeai import GenerativeModel
@@ -26,6 +26,9 @@ from pubsub_service import PubSubService
 from config import TOKEN_FILE
 from gmail_login import run_gmail_automation
 from websocket_manager import websocket_endpoint, broadcast_status
+
+from confirmation import send_text
+from pydantic import BaseModel
 
 # Load environment variables
 load_dotenv()
@@ -495,14 +498,13 @@ def start_watch(request: WatchRequest):
         # Option 2: Get from env var directly
         # topic_name = os.getenv("PUB SUB_TOPIC_NAME", "gmail-notifications") 
         # Option 3: Hardcode (less flexible)
-        # topic_name = "gmail-notifications"
+        #topic_name = "gmail-notifications"
         
         if not topic_name:
-             raise HTTPException(status_code=500, detail="Pub/Sub topic name not configured.")
+            raise HTTPException(status_code=500, detail="Pub/Sub topic name not configured.")
              
         logger.info(f"Starting Gmail watch for {request.user_id} targeting Pub/Sub topic: {topic_name}")
         watch_response = gmail_service_sync.start_watch(
-            topic_name=topic_name, # Pass topic name
             label_ids=request.label_ids
         )
 
@@ -839,6 +841,40 @@ async def gmail_push_webhook(request: Request, background_tasks: BackgroundTasks
 def index():
     gmail_service = GmailService()
     return gmail_service.indexer(db)
+
+class SmsReply(BaseModel):
+    textId: str
+    fromNumber: str
+    text: str
+    data: str | None = None
+
+@app.post("/handle-confirmation")
+async def handle_confirmation(
+    request: Request,
+    reply: SmsReply = Body(...),
+    x_textbelt_timestamp: str = Header(..., alias="X-textbelt-timestamp"),
+    x_textbelt_signature: str = Header(..., alias="X-textbelt-signature"),
+):
+    print("handle confirmation")
+    gmail_service = GmailService()
+    profile = gmail_service.service.users().getProfile(userId="me").execute()  
+    user_email = profile["emailAddress"]
+    phone_number = db.get_user_data(user_email).get("phone_number")
+
+    reply_text = reply.text.strip().lower()
+    if reply_text == "yes":
+        confirmation = db.get_confirmation(user_email)
+        print(confirmation)
+        gmail_service.reply(db, confirmation["respond_to_message_id"], confirmation["message_content"])
+        res = send_text(phone_number, "Perfect! The reply has been sent.")
+        print(res)
+        db.delete_confirmation(user_email)
+    elif reply_text == "no":
+        res = send_text(phone_number, "Got it! This reply won't be sent.")
+        print(res)
+        db.delete_confirmation(user_email)
+
+    return {"status": "received"}
 
 @app.get("/gmail/automate")
 async def run_gmail_automation_route():
