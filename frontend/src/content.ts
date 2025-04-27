@@ -411,7 +411,7 @@ if (window.location.hostname === 'mail.google.com') {
         // Update UI with fetched settings
         if (data.settings) {
           headlessSeleniumToggle.checked = data.settings.headless_selenium || false;
-          autoReplyToggle.checked = data.settings.auto_reply || false;
+          autoReplyToggle.checked = data.settings.auto_send || false;
           autoSpamRecoveryToggle.checked = data.settings.auto_spam_recovery || false;
           phoneNumberInput.value = data.settings.phone_number || '';
         }
@@ -450,7 +450,7 @@ if (window.location.hostname === 'mail.google.com') {
       // Collect settings from UI
       const settings = {
         headless_selenium: headlessSeleniumToggle.checked,
-        auto_reply: autoReplyToggle.checked,
+        auto_send: autoReplyToggle.checked,
         auto_spam_recovery: autoSpamRecoveryToggle.checked,
         phone_number: phoneNumberInput.value || null,
         email: userEmail // Include email in the settings payload
@@ -698,10 +698,10 @@ if (window.location.hostname === 'mail.google.com') {
           }, 1000);
         }
       } else {
-        addMessage(`Error during smart sort: ${result.detail}`, 'bot', 'color: #ff4444;');
+        //addMessage(`Error during smart sort: ${result.detail}`, 'bot', 'color: #ffffff;');
       }
     } catch (error) {
-      addMessage(`Failed to run smart sort: ${error}`, 'bot', 'color: #ff4444;');
+      //addMessage(`Failed to run smart sort: ${error}`, 'bot', 'color: #ffffff;');
     }
   });
 
