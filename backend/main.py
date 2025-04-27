@@ -3,7 +3,7 @@ import base64
 import os
 import asyncio
 from typing import Dict, Optional, List, Any
-from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks, WebSocket
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
@@ -22,6 +22,7 @@ from watch_scheduler import WatchScheduler
 from pubsub_service import PubSubService
 from config import TOKEN_FILE
 from gmail_login import run_gmail_automation
+from websocket_manager import websocket_endpoint, broadcast_status
 
 # Load environment variables
 load_dotenv()
@@ -53,6 +54,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Store active WebSocket connections
+active_connections: List[WebSocket] = []
+
+@app.websocket("/ws/status")
+async def ws_status(websocket: WebSocket):
+    await websocket_endpoint(websocket)
+
+async def broadcast_status(message: str, status_type: str = "info"):
+    """Broadcast a status message to all connected WebSocket clients"""
+    for connection in active_connections:
+        try:
+            await connection.send_json({
+                "type": status_type,
+                "message": message
+            })
+        except Exception as e:
+            logger.error(f"Error broadcasting to WebSocket: {e}")
 
 # Initialize database
 try:
@@ -800,10 +819,11 @@ def index():
     return gmail_service.indexer(db)
 
 @app.get("/gmail/automate")
-def run_gmail_automation_route():
+async def run_gmail_automation_route():
     """Run the Gmail automation script"""
     try:
-        result = run_gmail_automation()
+        # Run the automation in a background task
+        result = await asyncio.to_thread(run_gmail_automation)
         return result
     except Exception as e:
         logger.error(f"Error running Gmail automation: {str(e)}")
