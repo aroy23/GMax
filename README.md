@@ -79,3 +79,7 @@ GMax is a sophisticated email management system that uses AI to automatically pr
 - Complete history of automated actions
 
 ### Image Gallery
+
+![image](https://github.com/user-attachments/assets/a981bb72-0d6f-425b-b007-3ce453b040ee)
+
+![image](https://github.com/user-attachments/assets/49e62cbf-269a-4f50-8e84-7726603da080)
