@@ -872,6 +872,7 @@ async def run_gmail_automation_route():
     result = await run_gmail_automation()
     return result
 
+@app.get("/gmail/rescue-spam")
 @app.post("/gmail/rescue-spam")
 async def rescue_misclassified_spam(
     background_tasks: BackgroundTasks,
