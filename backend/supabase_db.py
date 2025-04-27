@@ -298,6 +298,8 @@ class SupabaseDB:
         ).execute()
     
     def get_actions(self, user_id):
-        result = self.supabase.table(SUPABASE_ACTIONS_TABLE).select("*").eq("user_id", user_id).order("id", desc=True).execute()
+        result = self.supabase.table(SUPABASE_ACTIONS_TABLE).select("*").eq("user_id", user_id).order("id", desc=False).execute()
         if result.data:
             return result.data
+        else:
+            return []

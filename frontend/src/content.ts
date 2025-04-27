@@ -581,6 +581,7 @@ if (window.location.hostname === 'mail.google.com') {
   }
 
   retrainButton.addEventListener('click', () => {
+    addAIAction("Retrained model to update your AI persona", new Date());
     fetchReTrain();
   });
 
@@ -623,6 +624,7 @@ if (window.location.hostname === 'mail.google.com') {
   smartSortButton.addEventListener('click', async () => {
     try {
       addMessage('Starting smart sort automation...', 'bot', 'color: #40e0d0;');
+      addAIAction("Smart sorted unread emails into appropriate categories", new Date());
       
       const response = await fetch('http://localhost:8000/gmail/automate');
       const result = await response.json();
@@ -678,6 +680,7 @@ if (window.location.hostname === 'mail.google.com') {
       border-radius: 12px;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
       transition: all 0.3s ease;
+      overflow: hidden; /* Hide overflow to enforce border radius */
     `;
 
     // Create header for AI actions panel
@@ -737,26 +740,17 @@ if (window.location.hostname === 'mail.google.com') {
       return;
     }
 
-    // Add some example actions
-    addAIAction('Analyzed email content for sentiment', new Date());
-    addAIAction('Generated response draft', new Date());
-    addAIAction('Suggested email categorization', new Date());
-    // HERE
-
-    console.log("test22")
     const response = await fetch('http://localhost:8000/get-actions', {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
     });
-
-    console.log("test");
     
     const result = await response.json();
     console.log(result);
-    result.actions.forEach((action: { action: string; created_at: Date; }) => {
-      addAIAction(action.action, action.created_at);
+    result.actions.forEach((action: { action: string; created_at: string; }) => {
+      addAIAction(action.action, new Date(action.created_at));
     });
   }
 
@@ -1223,6 +1217,7 @@ if (window.location.hostname === 'mail.google.com') {
       scrollbar-width: thin;
       scrollbar-color: rgba(64, 224, 208, 0.2) transparent;
       border-radius: 12px !important;
+      overflow: hidden; /* Ensure content doesn't overflow rounded corners */
     }
     
     #ai-actions-panel::before {
@@ -1243,17 +1238,25 @@ if (window.location.hostname === 'mail.google.com') {
     
     #ai-actions-panel::-webkit-scrollbar-track {
       background: transparent;
+      margin: 4px 0; /* Add space at top and bottom */
     }
     
     #ai-actions-panel::-webkit-scrollbar-thumb {
       background-color: rgba(64, 224, 208, 0.2);
       border-radius: 3px;
+      border: 2px solid transparent; /* Creates padding effect */
+      background-clip: padding-box;
     }
     
     #ai-actions-container {
       scrollbar-width: thin;
       scrollbar-color: rgba(64, 224, 208, 0.2) transparent;
-      overflow: hidden;
+      overflow: auto;
+      padding-right: 6px; /* Add padding to prevent content from touching scrollbar */
+      margin-right: -6px; /* Offset the padding to maintain alignment */
+      border-radius: 8px;
+      mask-image: linear-gradient(to bottom, transparent, black 10px, black 90%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, transparent, black 10px, black 90%, transparent 100%);
     }
     
     #ai-actions-container::-webkit-scrollbar {
@@ -1262,15 +1265,20 @@ if (window.location.hostname === 'mail.google.com') {
     
     #ai-actions-container::-webkit-scrollbar-track {
       background: transparent;
+      margin: 0 4px; /* Add space at left and right */
     }
     
     #ai-actions-container::-webkit-scrollbar-thumb {
       background-color: rgba(64, 224, 208, 0.2);
       border-radius: 3px;
+      border: 2px solid transparent; /* Creates padding effect */
+      background-clip: padding-box;
     }
     
     #ai-actions-container > div {
       transition: all 0.2s;
+      border-radius: 8px;
+      overflow: hidden;
     }
     
     #ai-actions-container > div:hover {
