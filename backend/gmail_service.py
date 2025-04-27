@@ -570,6 +570,10 @@ class GmailService:
             )
             
             persona = persona_response.text
+
+            persona_summary = model.generate_content(
+                "Take the persona prompt below and give me a plain string summary of it that starts with 'This persona' followed by the explanation of the persona:\n\n" + persona
+            )
             
             if existing_user:
                 # Update existing user's persona
@@ -580,7 +584,7 @@ class GmailService:
                 db.save_user_data(user_email, { "persona": persona })
                 print("Created new user with persona")
 
-            return {"Status": "Success!"}
+            return {"Status": "Success!", "PersonaSummary": persona_summary.text}
         
 
         except HttpError as error:

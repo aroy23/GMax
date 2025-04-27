@@ -299,8 +299,8 @@ if (window.location.hostname === 'mail.google.com') {
   // Connect WebSocket when content script loads
   connectWebSocket();
 
-  // Modify addMessage function to accept style
-  function addMessage(text: string, sender: 'user' | 'bot', style: string = '') {
+  // Modify addMessage function to accept style and tooltip
+  function addMessage(text: string, sender: 'user' | 'bot', style: string = '', tooltip?: string) {
     const messageDiv = document.createElement('div');
     messageDiv.style.cssText = `
       padding: 10px 14px;
@@ -314,8 +314,63 @@ if (window.location.hostname === 'mail.google.com') {
         : 'background: #2a2a2a; color: #ffffff; align-self: flex-start;'}
       box-shadow: 0 1px 2px rgba(0,0,0,0.2);
       ${style}
+      display: flex;
+      align-items: center;
+      gap: 8px;
     `;
-    messageDiv.textContent = text;
+
+    const textSpan = document.createElement('span');
+    textSpan.textContent = text;
+    messageDiv.appendChild(textSpan);
+
+    if (tooltip) {
+      const tooltipButton = document.createElement('button');
+      tooltipButton.innerHTML = '?';
+      tooltipButton.style.cssText = `
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        color: white;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+      `;
+
+      const tooltipDiv = document.createElement('div');
+      tooltipDiv.textContent = tooltip;
+      tooltipDiv.style.cssText = `
+        position: absolute;
+        background: rgba(0, 0, 0, 0.9);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 12px;
+        max-width: 300px;
+        z-index: 10000;
+        display: none;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      `;
+
+      tooltipButton.addEventListener('mouseenter', () => {
+        tooltipDiv.style.display = 'block';
+        const rect = tooltipButton.getBoundingClientRect();
+        tooltipDiv.style.top = `${rect.top - tooltipDiv.offsetHeight - 10}px`;
+        tooltipDiv.style.left = `${rect.left}px`;
+      });
+
+      tooltipButton.addEventListener('mouseleave', () => {
+        tooltipDiv.style.display = 'none';
+      });
+
+      messageDiv.appendChild(tooltipButton);
+      document.body.appendChild(tooltipDiv);
+    }
+
     messagesContainer.appendChild(messageDiv);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
     return messageDiv;
@@ -634,7 +689,7 @@ if (window.location.hostname === 'mail.google.com') {
       const response = await axios.get('http://127.0.0.1:8000/index');
       console.log('Data fetched:', response.data);
       clearInterval(loadingInterval);
-      addMessage('Persona Trained Successfully!', 'bot');
+      addMessage('Persona Trained Successfully!', 'bot', '', response.data.PersonaSummary);
     } catch (error) {
       console.error('Error fetching data:', error);
       clearInterval(loadingInterval);
