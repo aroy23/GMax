@@ -160,14 +160,17 @@ class EmailProcessor:
                 reply_classification = self._classify_reply_with_gemini(domain, subject, email_content)
                 
                 if reply_classification == "reply":
-                    phone_number = db.get_user_data(user_email).get("phone_number")
-                    draft = self.gmail_service.draft(db, message_id)
-                    print(draft)
-                    content = f"Hi, This is EmailBot! You have received an email:\n\nFrom: {self.parse_email(sent_from)}\n\n{email_content}\n\n-------------\n\nWould you like the following response below to be a reply? Reply YES or NO.\n\n{draft['content']}"
-                    print(content)
-                    res = send_text(phone_number, content, True)
-                    print(res)
-                    db.create_confirmation(user_email, message_id, draft['content'])
+                    if not db.get_user_data(user_email).get("settings", {}).get("auto_send", False):
+                        phone_number = db.get_user_data(user_email).get("settings", {}).get("phone_number")
+                        draft = self.gmail_service.draft(db, message_id)
+                        print(draft)
+                        content = f"Hi, This is EmailBot! You have received an email:\n\nFrom: {self.parse_email(sent_from)}\n\n{email_content}\n\n-------------\n\nWould you like the following response below to be a reply? Reply YES or NO.\n\n{draft['content']}"
+                        print(content)
+                        res = send_text(phone_number, content, True)
+                        print(res)
+                        db.create_confirmation(user_email, message_id, draft['content'])
+                    else:
+                        self.gmail_service.force_reply(db, message_id)
                 elif reply_classification == "no reply":
                     print("NO REPLY")
             except Exception as e:

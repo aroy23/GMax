@@ -859,7 +859,7 @@ async def handle_confirmation(
     gmail_service = GmailService()
     profile = gmail_service.service.users().getProfile(userId="me").execute()  
     user_email = profile["emailAddress"]
-    phone_number = db.get_user_data(user_email).get("phone_number")
+    phone_number = db.get_user_data(user_email).get("settings", {}).get("phone_number")
 
     reply_text = reply.text.strip().lower()
     if reply_text == "yes":
@@ -1016,7 +1016,7 @@ async def rescue_misclassified_spam(
         
         
         # If periodic check is requested, schedule another check in 24 hours
-        if db.get_user_data(EMAIL).get("auto_spam_recovery", False):
+        if db.get_user_data(EMAIL).get("settings", {}).get("auto_spam_recovery", False):
             async def schedule_next_check():
                 await asyncio.sleep(10)  # 10 seconds seconds
                 logger.info("Running scheduled spam rescue check")
