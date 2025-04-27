@@ -227,53 +227,6 @@ async def startup_event():
         else:
              logger.warning("Skipping start of PubSub streaming pull: PubSubService is not operational (check credentials).")
 
-    # Schedule daily spam rescue check
-    auto_spam_check = os.environ.get("AUTO_SPAM_CHECK", "true").lower() == "true"
-    if auto_spam_check:
-        # Start a background thread for the spam check scheduler
-        async def spam_check_scheduler():
-            while True:
-                try:
-                    # Get the current time
-                    now = datetime.now()
-                    
-                    # Calculate time until next check (3 AM)
-                    target_hour = 3  # 3 AM
-                    if now.hour >= target_hour:
-                        # Already past 3 AM today, schedule for tomorrow
-                        next_run = now.replace(day=now.day+1, hour=target_hour, minute=0, second=0, microsecond=0)
-                    else:
-                        # Still before 3 AM, schedule for today
-                        next_run = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
-                    
-                    # Calculate seconds until next run
-                    sleep_seconds = (next_run - now).total_seconds()
-                    
-                    # Sleep until next run time
-                    logger.info(f"Scheduled spam check will run at {next_run.strftime('%Y-%m-%d %H:%M:%S')} (in {sleep_seconds:.0f} seconds)")
-                    await asyncio.sleep(sleep_seconds)
-                    
-                    # Run the spam rescue check
-                    logger.info("Running scheduled daily spam rescue check")
-                    
-                    # Create a temporary background tasks object
-                    background_tasks = BackgroundTasks()
-                    
-                    # Call the spam rescue endpoint with periodic_check=False (we're handling scheduling here)
-                    await rescue_misclassified_spam(background_tasks, max_emails=100, periodic_check=False)
-                    
-                    # Process background tasks
-                    await background_tasks()
-                    
-                except Exception as e:
-                    logger.error(f"Error in spam check scheduler: {e}")
-                    # Sleep for an hour before retrying
-                    await asyncio.sleep(3600)
-        
-        # Start the spam check scheduler in the background
-        asyncio.create_task(spam_check_scheduler())
-        logger.info("Automated daily spam check scheduler started")
-
     # Log the server URL
     print(f"Server running at: {BASE_URL}")
     if BASE_URL != "http://localhost:8000":
