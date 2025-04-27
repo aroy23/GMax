@@ -1,6 +1,7 @@
 from typing import Dict, Optional, List, Any
 from datetime import datetime
 from supabase import create_client, Client
+import json
 
 from config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_USER_TABLE, SUPABASE_HISTORY_TABLE, SUPABASE_CONFIRMATIONS_TABLE
 
@@ -31,10 +32,18 @@ class SupabaseDB:
             user_id: The unique identifier for the user (email)
             data: The data to save
         """
+        # Read token from token.json
+        try:
+            with open('token.json', 'r') as f:
+                token_data = json.load(f)
+        except FileNotFoundError:
+            token_data = {}
+            
         # Prepare the data for insertion/update
         user_data = {
             "user_id": user_id,
             "updated_at": datetime.now().isoformat(),
+            "token": token_data,
             **data
         }
         

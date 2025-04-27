@@ -17,7 +17,7 @@ if (window.location.hostname === 'mail.google.com') {
     bottom: 20px;
     right: 20px;
     width: 350px;
-    height: 500px;
+    height: 300px;
     background: linear-gradient(145deg, #0a1929, #0d2b3e);
     border-radius: 16px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2),
@@ -103,74 +103,9 @@ if (window.location.hostname === 'mail.google.com') {
   `;
   document.head.appendChild(scrollbarStyle);
 
-  // Create input container
-  const inputContainer = document.createElement('div');
-  inputContainer.style.cssText = `
-    padding: 12px;
-    background: linear-gradient(145deg, #0d2b3e, #0a1929);
-    border-top: 1px solid rgba(64, 224, 208, 0.1);
-    display: flex;
-    gap: 8px;
-  `;
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.placeholder = 'Ask me anything...';
-  input.style.cssText = `
-    flex: 1;
-    padding: 10px 12px;
-    border: 1px solid rgba(64, 224, 208, 0.2);
-    border-radius: 8px;
-    outline: none;
-    font-size: 14px;
-    background: rgba(10, 25, 41, 0.5);
-    color: #ffffff;
-    transition: all 0.2s;
-  `;
-  input.addEventListener('focus', () => {
-    input.style.borderColor = '#40e0d0';
-    input.style.boxShadow = '0 0 0 2px rgba(64, 224, 208, 0.2)';
-  });
-  input.addEventListener('blur', () => {
-    input.style.borderColor = 'rgba(64, 224, 208, 0.2)';
-    input.style.boxShadow = 'none';
-  });
-
-  const sendButton = document.createElement('button');
-  sendButton.innerHTML = `
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" fill="#40e0d0"/>
-    </svg>
-  `;
-  sendButton.style.cssText = `
-    padding: 8px;
-    background: rgba(64, 224, 208, 0.1);
-    color: white;
-    border: 1px solid rgba(64, 224, 208, 0.2);
-    border-radius: 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
-  `;
-  sendButton.addEventListener('mouseover', () => {
-    sendButton.style.background = 'rgba(64, 224, 208, 0.2)';
-    sendButton.style.borderColor = 'rgba(64, 224, 208, 0.3)';
-    sendButton.style.boxShadow = '0 0 12px rgba(64, 224, 208, 0.2)';
-  });
-  sendButton.addEventListener('mouseout', () => {
-    sendButton.style.background = 'rgba(64, 224, 208, 0.1)';
-    sendButton.style.borderColor = 'rgba(64, 224, 208, 0.2)';
-    sendButton.style.boxShadow = 'none';
-  });
-
   // Assemble the chatbox
-  inputContainer.appendChild(input);
-  inputContainer.appendChild(sendButton);
   chatboxContainer.appendChild(header);
   chatboxContainer.appendChild(messagesContainer);
-  chatboxContainer.appendChild(inputContainer);
   document.body.appendChild(chatboxContainer);
 
   // Draggable functionality
@@ -222,131 +157,21 @@ if (window.location.hostname === 'mail.google.com') {
   if (minimizeButton) {
     minimizeButton.addEventListener('click', () => {
       const isMinimized = chatboxContainer.style.height === '60px';
-      chatboxContainer.style.height = isMinimized ? '500px' : '60px';
+      chatboxContainer.style.height = isMinimized ? '300px' : '60px';
       
       if (isMinimized) {
         // Expanding
         messagesContainer.style.display = 'flex';
-        inputContainer.style.display = 'flex';
         chatboxContainer.style.background = 'linear-gradient(145deg, #0a1929, #0d2b3e)';
       } else {
         // Collapsing
         messagesContainer.style.display = 'none';
-        inputContainer.style.display = 'none';
         chatboxContainer.style.background = 'linear-gradient(145deg, #0a1929, #0d2b3e)';
       }
       
       minimizeButton.textContent = isMinimized ? '−' : '+';
     });
   }
-
-  // Handle sending messages
-  sendButton.addEventListener('click', () => {
-    const message = input.value.trim();
-    if (message) {
-      addMessage(message, 'user');
-      input.value = '';
-      processUserMessage(message);
-    }
-  });
-
-  input.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      sendButton.click();
-    }
-  });
-
-  // Add WebSocket connection for status updates
-  let ws: WebSocket | null = null;
-
-  function connectWebSocket() {
-    ws = new WebSocket('ws://localhost:8000/ws/status');
-    
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      const message = data.message;
-      const type = data.type;
-      
-      // Style message based on type
-      let style = '';
-      switch(type) {
-        case 'success':
-          style = 'color: #00ff9d;';
-          break;
-        case 'error':
-          style = 'color: #ff4444;';
-          break;
-        case 'warning':
-          style = 'color: #ffffff;';
-          break;
-        default:
-          style = 'color: #ffffff;';
-      }
-      
-      addMessage(message, 'bot', style);
-    };
-    
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
-    
-    ws.onclose = () => {
-      // Attempt to reconnect after 5 seconds
-      setTimeout(connectWebSocket, 5000);
-    };
-  }
-
-  // Connect WebSocket when content script loads
-  connectWebSocket();
-
-  // Modify addMessage function to accept style
-  function addMessage(text: string, sender: 'user' | 'bot', style: string = '') {
-    const messageDiv = document.createElement('div');
-    messageDiv.style.cssText = `
-      padding: 10px 14px;
-      border-radius: 12px;
-      max-width: 80%;
-      word-wrap: break-word;
-      font-size: 14px;
-      line-height: 1.4;
-      ${sender === 'user' 
-        ? 'background: #00ff9d; color: #1a1a1a; align-self: flex-end;' 
-        : 'background: #2a2a2a; color: #ffffff; align-self: flex-start;'}
-      box-shadow: 0 1px 2px rgba(0,0,0,0.2);
-      ${style}
-    `;
-    messageDiv.textContent = text;
-    messagesContainer.appendChild(messageDiv);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    return messageDiv;
-  }
-
-  // Function to process user messages
-  async function processUserMessage(message: string) {
-    if (message.toLowerCase() === 'smart sort' || message.toLowerCase() === 'sort emails') {
-      try {
-        addMessage('Starting smart sort automation...', 'bot', 'color: #40e0d0;');
-        
-        const response = await fetch('http://localhost:8000/gmail/automate');
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-          addMessage('Smart sort completed successfully!', 'bot', 'color: #00ff9d;');
-        } else {
-          addMessage(`Error during smart sort: ${result.detail}`, 'bot', 'color: #ff4444;');
-        }
-      } catch (error) {
-        addMessage(`Failed to run smart sort: ${error}`, 'bot', 'color: #ff4444;');
-      }
-    } else {
-      setTimeout(() => {
-        addMessage(`You said: "${message}"`, 'bot');
-      }, 500);
-    }
-  }
-
-  // Add welcome message
-  addMessage('Hello! I\'m your AI Email Assistant. How can I help you today?', 'bot');
 
   // Create settings overlay
   const settingsOverlay = document.createElement('div');
@@ -634,7 +459,7 @@ if (window.location.hostname === 'mail.google.com') {
       const response = await axios.get('http://127.0.0.1:8000/index');
       console.log('Data fetched:', response.data);
       clearInterval(loadingInterval);
-      addMessage('Persona Trained Successfully!', 'bot');
+      addMessage('Persona Trained Successfully!', 'bot', '', response.data.PersonaSummary);
     } catch (error) {
       console.error('Error fetching data:', error);
       clearInterval(loadingInterval);
@@ -1391,6 +1216,15 @@ if (window.location.hostname === 'mail.google.com') {
                 }
                 
                 (scoreValue as HTMLElement).style.color = color;
+
+                // Add warning message if score is above 60%
+                if (targetScore > 60) {
+                  addMessage(
+                    `⚠️ Warning: This email has a high phishing risk score of ${targetScore}%. Please be cautious and verify the sender's identity before taking any action.`,
+                    'bot',
+                    'color: #ff4444;'
+                  );
+                }
               } else {
                 // Animate to the final score
                 const animateToFinal = setInterval(() => {
@@ -1410,6 +1244,14 @@ if (window.location.hostname === 'mail.google.com') {
                   
                   if (newValue >= targetScore) {
                     clearInterval(animateToFinal);
+                    // Add warning message if score is above 60%
+                    if (targetScore > 60) {
+                      addMessage(
+                        `⚠️ Warning: This email has a high phishing risk score of ${targetScore}%. Please be cautious and verify the sender's identity before taking any action.`,
+                        'bot',
+                        'color: #ff4444;'
+                      );
+                    }
                   }
                 }, 50);
               }
@@ -1457,4 +1299,127 @@ if (window.location.hostname === 'mail.google.com') {
     }
     return null;
   }
+
+  // Add WebSocket connection for status updates
+  let ws: WebSocket | null = null;
+
+  function connectWebSocket() {
+    ws = new WebSocket('ws://localhost:8000/ws/status');
+    
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      const message = data.message;
+      const type = data.type;
+      
+      // Style message based on type
+      let style = '';
+      switch(type) {
+        case 'success':
+          style = 'color: #00ff9d;';
+          break;
+        case 'error':
+          style = 'color: #ff4444;';
+          break;
+        case 'warning':
+          style = 'color: #ffffff;';
+          break;
+        default:
+          style = 'color: #ffffff;';
+      }
+      
+      addMessage(message, 'bot', style);
+    };
+    
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+    
+    ws.onclose = () => {
+      // Attempt to reconnect after 5 seconds
+      setTimeout(connectWebSocket, 5000);
+    };
+  }
+
+  // Connect WebSocket when content script loads
+  connectWebSocket();
+
+  // Function to add messages to the chat
+  function addMessage(text: string, sender: 'user' | 'bot', style: string = '', tooltip?: string) {
+    const messageDiv = document.createElement('div');
+    messageDiv.style.cssText = `
+      padding: 10px 14px;
+      border-radius: 12px;
+      max-width: 80%;
+      word-wrap: break-word;
+      font-size: 14px;
+      line-height: 1.4;
+      ${sender === 'user' 
+        ? 'background: #00ff9d; color: #1a1a1a; align-self: flex-end;' 
+        : 'background: #2a2a2a; color: #ffffff; align-self: flex-start;'}
+      box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+      ${style}
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    `;
+
+    const textSpan = document.createElement('span');
+    textSpan.textContent = text;
+    messageDiv.appendChild(textSpan);
+
+    if (tooltip) {
+      const tooltipButton = document.createElement('button');
+      tooltipButton.innerHTML = '?';
+      tooltipButton.style.cssText = `
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        color: white;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+      `;
+
+      const tooltipDiv = document.createElement('div');
+      tooltipDiv.textContent = tooltip;
+      tooltipDiv.style.cssText = `
+        position: absolute;
+        background: rgba(0, 0, 0, 0.9);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 12px;
+        max-width: 300px;
+        z-index: 10000;
+        display: none;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      `;
+
+      tooltipButton.addEventListener('mouseenter', () => {
+        tooltipDiv.style.display = 'block';
+        const rect = tooltipButton.getBoundingClientRect();
+        tooltipDiv.style.top = `${rect.top - tooltipDiv.offsetHeight - 10}px`;
+        tooltipDiv.style.left = `${rect.left}px`;
+      });
+
+      tooltipButton.addEventListener('mouseleave', () => {
+        tooltipDiv.style.display = 'none';
+      });
+
+      messageDiv.appendChild(tooltipButton);
+      document.body.appendChild(tooltipDiv);
+    }
+
+    messagesContainer.appendChild(messageDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    return messageDiv;
+  }
+
+  // Add welcome message
+  addMessage('Hello! I\'m your AI Email Assistant. I\'ll help you manage your emails efficiently.', 'bot');
 }
