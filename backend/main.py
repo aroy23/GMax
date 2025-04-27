@@ -13,6 +13,7 @@ import threading
 import httpx
 import uuid
 from google.cloud import pubsub_v1
+from datetime import datetime
 
 from gmail_auth import start_oauth_flow, complete_oauth_flow
 from gmail_service import GmailService
@@ -225,6 +226,53 @@ async def startup_event():
             logger.info("PubSub streaming pull thread started")
         else:
              logger.warning("Skipping start of PubSub streaming pull: PubSubService is not operational (check credentials).")
+
+    # Schedule daily spam rescue check
+    auto_spam_check = os.environ.get("AUTO_SPAM_CHECK", "true").lower() == "true"
+    if auto_spam_check:
+        # Start a background thread for the spam check scheduler
+        async def spam_check_scheduler():
+            while True:
+                try:
+                    # Get the current time
+                    now = datetime.now()
+                    
+                    # Calculate time until next check (3 AM)
+                    target_hour = 3  # 3 AM
+                    if now.hour >= target_hour:
+                        # Already past 3 AM today, schedule for tomorrow
+                        next_run = now.replace(day=now.day+1, hour=target_hour, minute=0, second=0, microsecond=0)
+                    else:
+                        # Still before 3 AM, schedule for today
+                        next_run = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
+                    
+                    # Calculate seconds until next run
+                    sleep_seconds = (next_run - now).total_seconds()
+                    
+                    # Sleep until next run time
+                    logger.info(f"Scheduled spam check will run at {next_run.strftime('%Y-%m-%d %H:%M:%S')} (in {sleep_seconds:.0f} seconds)")
+                    await asyncio.sleep(sleep_seconds)
+                    
+                    # Run the spam rescue check
+                    logger.info("Running scheduled daily spam rescue check")
+                    
+                    # Create a temporary background tasks object
+                    background_tasks = BackgroundTasks()
+                    
+                    # Call the spam rescue endpoint with periodic_check=False (we're handling scheduling here)
+                    await rescue_misclassified_spam(background_tasks, max_emails=100, periodic_check=False)
+                    
+                    # Process background tasks
+                    await background_tasks()
+                    
+                except Exception as e:
+                    logger.error(f"Error in spam check scheduler: {e}")
+                    # Sleep for an hour before retrying
+                    await asyncio.sleep(3600)
+        
+        # Start the spam check scheduler in the background
+        asyncio.create_task(spam_check_scheduler())
+        logger.info("Automated daily spam check scheduler started")
 
     # Log the server URL
     print(f"Server running at: {BASE_URL}")
@@ -815,19 +863,115 @@ async def gmail_push_webhook(request: Request, background_tasks: BackgroundTasks
 
 @app.get("/index")
 def index():
-    gmail_service = GmailService()
-    return gmail_service.indexer(db)
+    """Redirect to docs"""
+    return RedirectResponse(url="/docs")
 
 @app.get("/gmail/automate")
 async def run_gmail_automation_route():
-    """Run the Gmail automation script"""
+    """Run Gmail automation as a route"""
+    result = await run_gmail_automation()
+    return result
+
+@app.post("/gmail/rescue-spam")
+async def rescue_misclassified_spam(
+    background_tasks: BackgroundTasks,
+    max_emails: int = 50,
+    periodic_check: bool = False
+):
+    """
+    Scan all spam emails and rescue any that appear to be legitimate.
+    
+    This endpoint:
+    1. Fetches all emails with the SPAM label
+    2. Analyzes each email with Gemini to determine if it's legitimate
+    3. Moves misclassified emails from Spam to Inbox
+    
+    Args:
+        max_emails: Maximum number of spam emails to analyze (default: 50)
+        periodic_check: Whether to schedule recurring checks (default: False)
+    """
     try:
-        # Run the automation in a background task
-        result = await asyncio.to_thread(run_gmail_automation)
-        return result
+        # Initialize Gmail service
+        gmail_service = GmailService()
+        
+        # Initialize the email processor for AI classification
+        email_processor = EmailProcessor()
+        
+        # Get all messages with SPAM label
+        spam_messages = gmail_service.list_messages(max_results=max_emails, label_ids=["SPAM"])
+        
+        if not spam_messages:
+            return {"status": "success", "message": "No spam messages found to analyze"}
+        
+        results = {
+            "analyzed": 0,
+            "rescued": 0,
+            "kept_as_spam": 0,
+            "rescued_emails": []
+        }
+        
+        # Process each spam message
+        for message_meta in spam_messages:
+            message_id = message_meta.get("id")
+            
+            # Get the full message
+            message = gmail_service.get_message(message_id, format="full")
+            
+            # Extract headers and content
+            headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
+            email_content = email_processor._extract_email_content(message)
+            
+            # Extract sender domain from email
+            sender = headers.get("From", "")
+            domain = sender.split('@')[-1].split('>')[0] if '@' in sender else ""
+            subject = headers.get("Subject", "")
+            
+            # Use Gemini to determine if this is really spam
+            classification = email_processor._classify_spam_with_gemini(domain, subject, email_content)
+            
+            results["analyzed"] += 1
+            
+            # If not spam, rescue it
+            if classification == "not spam":
+                # Move from Spam to Inbox
+                gmail_service.modify_message(
+                    message_id=message_id,
+                    add_labels=["INBOX"],
+                    remove_labels=["SPAM"]
+                )
+                
+                results["rescued"] += 1
+                results["rescued_emails"].append({
+                    "from": sender,
+                    "subject": subject,
+                    "preview": email_content[:100] + "..." if len(email_content) > 100 else email_content
+                })
+                
+                logger.info(f"Rescued email from spam: {subject} from {sender}")
+            else:
+                results["kept_as_spam"] += 1
+                logger.info(f"Confirmed spam: {subject} from {sender}")
+        
+        # If periodic check is requested, schedule another check in 24 hours
+        if periodic_check:
+            async def schedule_next_check():
+                await asyncio.sleep(24 * 60 * 60)  # 24 hours in seconds
+                logger.info("Running scheduled spam rescue check")
+                # Run the rescue operation again with the same parameters
+                await rescue_misclassified_spam(background_tasks, max_emails, True)
+            
+            background_tasks.add_task(schedule_next_check)
+            logger.info(f"Scheduled next spam rescue check in 24 hours")
+            results["next_check_scheduled"] = True
+                
+        return {
+            "status": "success",
+            "results": results
+        }
+        
     except Exception as e:
-        logger.error(f"Error running Gmail automation: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error rescuing spam: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
