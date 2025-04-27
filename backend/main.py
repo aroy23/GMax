@@ -839,7 +839,7 @@ async def gmail_push_webhook(request: Request, background_tasks: BackgroundTasks
 
 @app.get("/index")
 def index():
-    db.create_action(EMAIL, "Retrained model to update your AI persona")
+    db.create_action(EMAIL, "Retrained AI persona")
     gmail_service = GmailService()
     return gmail_service.indexer(db)
 
@@ -881,7 +881,7 @@ async def handle_confirmation(
 async def run_gmail_automation_route():
     """Run the Gmail automation script"""
     try:
-        db.create_action(EMAIL, "Smart sorted unread emails into appropriate categories")
+        db.create_action(EMAIL, "Smart sort unread emails")
         headless_bool = db.get_user_data(EMAIL).get("settings", {}).get("headless_selenium", True)
         result = await asyncio.to_thread(run_gmail_automation, headless=headless_bool)
         return result
@@ -1028,7 +1028,7 @@ async def rescue_misclassified_spam(
             logger.info(f"Scheduled next spam rescue check in 24 hours")
             results["next_check_scheduled"] = True
         
-        db.create_action(EMAIL, "Checked spam folder for non-spam emails")
+        db.create_action(EMAIL, "Checked spam folder")
 
         return {
             "status": "success",

@@ -633,6 +633,7 @@ if (window.location.hostname === 'mail.google.com') {
       console.log('Data fetched:', response.data);
       clearInterval(loadingInterval);
       addMessage('Persona Trained Successfully!', 'bot', '', response.data.PersonaSummary);
+      addAIAction("Retrained AI persona", new Date());
     } catch (error) {
       console.error('Error fetching data:', error);
       clearInterval(loadingInterval);
@@ -641,7 +642,6 @@ if (window.location.hostname === 'mail.google.com') {
   }
 
   retrainButton.addEventListener('click', () => {
-    addAIAction("Retrained model to update your AI persona", new Date());
     fetchReTrain();
   });
 
@@ -684,7 +684,7 @@ if (window.location.hostname === 'mail.google.com') {
   smartSortButton.addEventListener('click', async () => {
     try {
       addMessage('Starting smart sort automation...', 'bot', 'color: #40e0d0;');
-      addAIAction("Smart sorted unread emails into appropriate categories", new Date());
+      // addAIAction("Smart sort unread emails", new Date());
       
       const response = await fetch('http://localhost:8000/gmail/automate');
       const result = await response.json();
@@ -749,6 +749,11 @@ if (window.location.hostname === 'mail.google.com') {
   
       const response = await fetch('http://localhost:8000/gmail/rescue-spam');
       const result = await response.json();
+
+      if (result.message === "No spam messages found to analyze") {
+        addMessage('No spam messages found to analyze', 'bot', 'color:rgb(250, 202, 30);');
+        return;
+      }
       
       if (result.status === 'success') {
         // Create a detailed message with summary
@@ -758,7 +763,7 @@ if (window.location.hostname === 'mail.google.com') {
         
         addMessage(summary, 'bot', 'color: #00ff9d;');
         
-        addAIAction("Checked spam folder for non-spam emails", new Date());
+        addAIAction("Checked spam folder", new Date());
         
         // If emails were rescued, display details about them
         if (result.results.rescued > 0 && result.results.rescued_emails && result.results.rescued_emails.length > 0) {
@@ -965,8 +970,8 @@ if (window.location.hostname === 'mail.google.com') {
 
     const actionElement = document.createElement('div');
     actionElement.style.cssText = `
-      min-width: 180px;
-      max-width: 180px;
+      min-width: 250px;
+      max-width: 250px;
       padding: 8px 12px;
       background: rgba(64, 224, 208, 0.1);
       border: 1px solid rgba(64, 224, 208, 0.2);
