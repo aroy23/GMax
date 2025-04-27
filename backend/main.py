@@ -863,14 +863,19 @@ async def gmail_push_webhook(request: Request, background_tasks: BackgroundTasks
 
 @app.get("/index")
 def index():
-    """Redirect to docs"""
-    return RedirectResponse(url="/docs")
+    gmail_service = GmailService()
+    return gmail_service.indexer(db)
 
 @app.get("/gmail/automate")
 async def run_gmail_automation_route():
-    """Run Gmail automation as a route"""
-    result = await run_gmail_automation()
-    return result
+    """Run the Gmail automation script"""
+    try:
+        # Run the automation in a background task
+        result = await asyncio.to_thread(run_gmail_automation)
+        return result
+    except Exception as e:
+        logger.error(f"Error running Gmail automation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/gmail/rescue-spam")
 @app.post("/gmail/rescue-spam")

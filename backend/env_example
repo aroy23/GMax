@@ -12,6 +12,3 @@ SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_KEY=your-supabase-anon-key 
 
 GEMINI_API_KEY=your_gemini_key
-
-# Enable or disable automatic daily spam folder checking (default: true)
-AUTO_SPAM_CHECK=true
