@@ -744,8 +744,14 @@ if (window.location.hostname === 'mail.google.com') {
   rescueSpamButton.addEventListener('click', async () => {
     try {
       let auto_check = true;
-      const settings = await fetch('http://localhost:8000/settings');
-      const settingsData = await settings.json();
+      // First get the user's email from the /email endpoint
+      const emailResponse = await fetch('http://localhost:8000/email');
+      const emailData = await emailResponse.json();
+      const userEmail = emailData.email;
+      // Use the email as a query parameter
+      const settingsResponse = await fetch(`http://localhost:8000/settings?email=${encodeURIComponent(userEmail)}`);
+      const settingsData = await settingsResponse.json();
+      console.log(settingsData);
       if (settingsData.settings.auto_spam_recovery) {
         auto_check = true;
       } else {
@@ -753,21 +759,18 @@ if (window.location.hostname === 'mail.google.com') {
       }
       
       if (auto_check) {
-        const rep = await fetch('http://localhost:8000/settings');
-        const auto_check_response = await rep.json();
-        while (auto_check_response.settings.auto_spam_recovery) {
+        while (settingsData.settings.auto_spam_recovery) {
           addMessage('Auto Checking spam folder for legitimate emails...', 'bot', 'color: #40e0d0;');
+          const rep = await fetch(`http://localhost:8000/settings?email=${encodeURIComponent(userEmail)}`);
+          const rep_data = await rep.json();
+
+          if (!rep_data.settings.auto_spam_recovery) {
+            break;
+          }
           const autoResponse = await fetch('http://localhost:8000/gmail/rescue-spam');
           const auto_result = await autoResponse.json();
             
           if (auto_result.status === 'success') {
-            // Create a detailed message with summary
-            const summary = `Spam rescue completed! Analyzed ${auto_result.results.analyzed} emails: 
-            ✅ ${auto_result.results.rescued} rescued 
-            ⚠️ ${auto_result.results.kept_as_spam} kept as spam`;
-            
-            addMessage(summary, 'bot', 'color: #00ff9d;');
-            
             // If emails were rescued, display details about them
             if (auto_result.results.rescued > 0 && auto_result.results.rescued_emails && auto_result.results.rescued_emails.length > 0) {
               // Add a small delay to separate messages
