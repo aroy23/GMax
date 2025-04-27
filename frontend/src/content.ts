@@ -743,99 +743,50 @@ if (window.location.hostname === 'mail.google.com') {
 
   rescueSpamButton.addEventListener('click', async () => {
     try {
-      let auto_check = true;
-      const settings = await fetch('http://localhost:8000/settings');
-      const settingsData = await settings.json();
-      if (settingsData.settings.auto_spam_recovery) {
-        auto_check = true;
-      } else {
-        auto_check = false;
-      }
+      addMessage('Checking spam folder for legitimate emails...', 'bot', 'color: #40e0d0;');
+  
+      const response = await fetch('http://localhost:8000/gmail/rescue-spam');
+      const result = await response.json();
       
-      if (auto_check) {
-        const rep = await fetch('http://localhost:8000/settings');
-        const auto_check_response = await rep.json();
-        while (auto_check_response.settings.auto_spam_recovery) {
-          addMessage('Auto Checking spam folder for legitimate emails...', 'bot', 'color: #40e0d0;');
-          const autoResponse = await fetch('http://localhost:8000/gmail/rescue-spam');
-          const auto_result = await autoResponse.json();
+      if (result.status === 'success') {
+        // Create a detailed message with summary
+        const summary = `Spam rescue completed! Analyzed ${result.results.analyzed} emails: 
+        ✅ ${result.results.rescued} rescued 
+        ⚠️ ${result.results.kept_as_spam} kept as spam`;
+        
+        addMessage(summary, 'bot', 'color: #00ff9d;');
+        
+        // If emails were rescued, display details about them
+        if (result.results.rescued > 0 && result.results.rescued_emails && result.results.rescued_emails.length > 0) {
+          // Add a small delay to separate messages
+          setTimeout(() => {
+            addMessage('Rescued emails:', 'bot', 'color: #40e0d0; font-weight: 500;');
             
-          if (auto_result.status === 'success') {
-            // Create a detailed message with summary
-            const summary = `Spam rescue completed! Analyzed ${auto_result.results.analyzed} emails: 
-            ✅ ${auto_result.results.rescued} rescued 
-            ⚠️ ${auto_result.results.kept_as_spam} kept as spam`;
-            
-            addMessage(summary, 'bot', 'color: #00ff9d;');
-            
-            // If emails were rescued, display details about them
-            if (auto_result.results.rescued > 0 && auto_result.results.rescued_emails && auto_result.results.rescued_emails.length > 0) {
-              // Add a small delay to separate messages
+            // Add each rescued email with details
+            result.results.rescued_emails.forEach((email: { from: string; subject: string; preview?: string }, index: number) => {
+              const emailDetails = `${index + 1}. From: ${email.from}
+              Subject: ${email.subject}`;              
+              // Add with slight delay between messages for better readability
               setTimeout(() => {
-                addMessage('Rescued emails:', 'bot', 'color: #40e0d0; font-weight: 500;');
-                // Add each rescued email with details
-                auto_result.results.rescued_emails.forEach((email: { from: string; subject: string; preview?: string }, index: number) => {
-                  const emailDetails = `${index + 1}. From: ${email.from}
-                  Subject: ${email.subject}`;              
-                  // Add with slight delay between messages for better readability
-                  setTimeout(() => {
-                    addMessage(emailDetails, 'bot', 'color: #ffffff; background: rgba(64, 224, 208, 0.1);');
-                  }, index * 200);
-                });
-              }, 300);
-            }
-          } 
-          else {
-            break; // Exit the loop if not successful
-          }
+                addMessage(emailDetails, 'bot', 'color: #ffffff; background: rgba(64, 224, 208, 0.1);');
+              }, index * 200);
+            });
+          }, 300);
+        }
+        
+        if (result.results.rescued > 0) {
+          // Wait a longer moment to show the success message and email details before refreshing
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
         }
       } else {
-        // Regular non-auto check
-        addMessage('Checking spam folder for legitimate emails...', 'bot', 'color: #40e0d0;');
-    
-        const response = await fetch('http://localhost:8000/gmail/rescue-spam');
-        const result = await response.json();
-        
-        if (result.status === 'success') {
-          // Create a detailed message with summary
-          const summary = `Spam rescue completed! Analyzed ${result.results.analyzed} emails: 
-          ✅ ${result.results.rescued} rescued 
-          ⚠️ ${result.results.kept_as_spam} kept as spam`;
-          
-          addMessage(summary, 'bot', 'color: #00ff9d;');
-          
-          // If emails were rescued, display details about them
-          if (result.results.rescued > 0 && result.results.rescued_emails && result.results.rescued_emails.length > 0) {
-            // Add a small delay to separate messages
-            setTimeout(() => {
-              addMessage('Rescued emails:', 'bot', 'color: #40e0d0; font-weight: 500;');
-              
-              // Add each rescued email with details
-              result.results.rescued_emails.forEach((email: { from: string; subject: string; preview?: string }, index: number) => {
-                const emailDetails = `${index + 1}. From: ${email.from}
-                Subject: ${email.subject}`;              
-                // Add with slight delay between messages for better readability
-                setTimeout(() => {
-                  addMessage(emailDetails, 'bot', 'color: #ffffff; background: rgba(64, 224, 208, 0.1);');
-                }, index * 200);
-              });
-            }, 300);
-          }
-          
-          if (result.results.rescued > 0) {
-            // Wait a longer moment to show the success message and email details before refreshing
-            setTimeout(() => {
-              window.location.reload();
-            }, 1000);
-          }
-        } else {
-          addMessage(`Error during spam rescue: ${result.detail}`, 'bot', 'color: #ff4444;');
-        }
+        addMessage(`Error during spam rescue: ${result.detail || 'Unknown error'}`, 'bot', 'color: #ff4444;');
       }
     } catch (error) {
-      addMessage(`Failed to rescue spam: ${error}`, 'bot', 'color: #ff4444;');
-    }
-  });
+    addMessage(`Failed to rescue spam: ${error}`, 'bot', 'color: #ff4444;');
+  }
+});
 
   quickActionsPanel.appendChild(retrainButton);
   quickActionsPanel.appendChild(smartSortButton);
