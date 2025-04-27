@@ -34,7 +34,7 @@ def get_credentials() -> Credentials:
     # Check if we have a local token file for this user
     if os.path.exists(token_filename):
 
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, GMAIL_SCOPES)
+        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
 
     # If credentials don't exist or are invalid
     if not creds or not creds.valid:
@@ -64,7 +64,7 @@ def get_credentials() -> Credentials:
                 )
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
-                "client_secret.json", GMAIL_SCOPES
+                "client_secret.json", SCOPES
             )
             print(flow)
             creds = flow.run_local_server(port=0)
@@ -92,7 +92,7 @@ def start_oauth_flow(redirect_uri: str, state: str = None, force_consent: bool =
         
         flow = InstalledAppFlow.from_client_secrets_file(
             CLIENT_SECRET_FILE, 
-            scopes=GMAIL_SCOPES,
+            scopes=SCOPES,
             redirect_uri=redirect_uri
         )
         
@@ -119,7 +119,7 @@ def start_oauth_flow(redirect_uri: str, state: str = None, force_consent: bool =
         logger.error(f"OAuth flow error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"OAuth flow error: {str(e)}")
 
-def complete_oauth_flow(code: str, redirect_uri: str, user_id: str) -> Dict:
+def complete_oauth_flow(code: str, redirect_uri: str) -> Dict:
     """
     Complete the OAuth flow with the received authorization code
     
@@ -133,8 +133,6 @@ def complete_oauth_flow(code: str, redirect_uri: str, user_id: str) -> Dict:
     """
     print("TEST 2")
     try:
-        logger.info(f"Completing OAuth flow for user: {user_id} with redirect_uri: {redirect_uri}")
-        
         # Handle case where redirect_uri might have been modified (e.g., additional parameters)
         # Strip any query parameters to ensure it matches what Google expects
         if "?" in redirect_uri:
@@ -144,52 +142,26 @@ def complete_oauth_flow(code: str, redirect_uri: str, user_id: str) -> Dict:
             
         flow = InstalledAppFlow.from_client_secrets_file(
             CLIENT_SECRET_FILE,
-            scopes=GMAIL_SCOPES,
+            scopes=SCOPES,
             redirect_uri=redirect_uri
         )
+
         flow.fetch_token(code=code)
         creds = flow.credentials
         
         # Save credentials to file - use email address as token identifier
         token_data = json.loads(creds.to_json())
         
-        # Always try to extract the email from the ID token
-        email = None
-        if hasattr(creds, 'id_token') and creds.id_token:
-            try:
-                from google.oauth2 import id_token
-                from google.auth.transport import requests as google_requests
-                info = id_token.verify_oauth2_token(
-                    creds.id_token, google_requests.Request(), None)
-                if 'email' in info:
-                    email = info['email']
-                    logger.info(f"Using email from token: {email}")
-            except Exception as e:
-                logger.warning(f"Could not extract email from id_token: {e}")
-        
-        # If we couldn't extract email from token, fall back to user_id
-        if not email:
-            email = user_id
-            logger.info(f"Using provided user_id as identifier: {email}")
-        
-        # Store the email in the token data for reference
-        token_data['email'] = email
-        
         # Use a standardized filename format with the email
-        token_file = f"{email}_{TOKEN_FILE}"
+        token_file = TOKEN_FILE
         
         # Remove any existing token files for this user
         if os.path.exists(token_file):
-            try:
-                os.remove(token_file)
-                logger.info(f"Removed existing token file for {email}")
-            except Exception as e:
-                logger.warning(f"Could not remove existing token file: {e}")
+            return {"status": "success", "message": "Token already exists"}
         
         # Save the new token
         with open(token_file, 'w') as token:
             json.dump(token_data, token)
-            logger.info(f"Saved new token file for {email}")
             
         return token_data
     except Exception as e:

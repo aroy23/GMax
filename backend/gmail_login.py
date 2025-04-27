@@ -17,7 +17,7 @@ from websocket_manager import broadcast_status
 # Load credentials
 load_dotenv()
 
-def run_gmail_automation():
+def run_gmail_automation(headless: bool = False):
     email = os.getenv("GMAIL_EMAIL")
     password = os.getenv("GMAIL_PASSWORD")
     gemini_api_key = os.getenv("GEMINI_API_KEY")
@@ -28,7 +28,7 @@ def run_gmail_automation():
 
     # Chrome "stealth" options
     chrome_options = Options()
-    chrome_options.add_argument('--headless=new')
+    chrome_options.add_argument('--headless=new') if headless else None
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument(

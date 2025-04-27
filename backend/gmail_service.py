@@ -22,7 +22,7 @@ from email.mime.text import MIMEText
 import google.auth
 import google.generativeai as genai
 
-from config import GEMINI_API_KEY
+from config import GEMINI_API_KEY, TOKEN_FILE
 
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-2.0-flash")
@@ -38,6 +38,12 @@ class GmailService:
         """
         self.credentials = get_credentials()
         self.service = build('gmail', 'v1', credentials=self.credentials)
+
+    def get_credentials(self):
+        with open(TOKEN_FILE, 'r') as f:
+            data = json.load(f)
+            return data
+        return None
         
     def start_watch(self, label_ids: Optional[List[str]] = None, webhook_url: Optional[str] = None) -> Dict:
         """
