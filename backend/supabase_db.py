@@ -199,9 +199,70 @@ class SupabaseDB:
         """
         # Get users with watch_expiration field
         result = self.supabase.table(SUPABASE_USER_TABLE).select("*").not_.is_("watch_expiration", "null").execute()
+        return result.data if result.data else []
         
-        return result.data if result.data else [] 
-    
+    def get_user_by_token(self, token: str) -> Optional[Dict]:
+        """
+        Find a user based on their auth token
+        
+        Args:
+            token: The authentication token (e.g., access_token or refresh_token)
+            
+        Returns:
+            User data dict or None if not found
+        """
+        try:
+            # Query all users
+            all_users = self.get_all_users()
+            
+            # Iterate through users to find a matching token
+            for user in all_users:
+                if not user.get('token'):
+                    continue
+                    
+                token_data = user.get('token', {})
+                
+                # Check for token match - could be in access_token, refresh_token, or token
+                if (token_data.get('access_token') == token or 
+                    token_data.get('refresh_token') == token or 
+                    token_data.get('token') == token):
+                    return user
+            
+            # No match found
+            return None
+        except Exception as e:
+            print(f"Error in get_user_by_token: {e}")
+            return None
+            
+    def update_user_by_token(self, token: str, updates: Dict) -> Dict:
+        """
+        Update user data directly using token matching
+        
+        Args:
+            token: The authentication token 
+            updates: Fields to update
+            
+        Returns:
+            Updated user data or empty dict if user not found
+        """
+        try:
+            # Find the user by token
+            user = self.get_user_by_token(token)
+            if not user:
+                print(f"No user found with the provided token")
+                return {}
+            
+            # Get the user_id
+            user_id = user.get('user_id')
+            if not user_id:
+                print("User found but missing user_id field")
+                return {}
+                
+            # Use the existing update method
+            return self.update_user_data(user_id, updates)
+        except Exception as e:
+            print(f"Error in update_user_by_token: {e}")
+
     def create_confirmation(self, user_id, message_id, message_content):
         confirmation_data = {}
         confirmation_data["user_id"] = user_id

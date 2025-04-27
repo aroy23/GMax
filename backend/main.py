@@ -2,16 +2,19 @@ import json
 import base64
 import os
 import asyncio
-from typing import Dict, Optional, List, Any
-from fastapi import FastAPI, HTTPException, Depends, Request, Body, Header, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Request, Body, Header, BackgroundTasks, WebSocket
+from typing import Dict, Optional, List, Any, Union
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from dotenv import load_dotenv
 import logging
 import threading
 import httpx
 from google.cloud import pubsub_v1
+from datetime import datetime
+from google.generativeai import GenerativeModel
+import google.generativeai as genai
 
 from gmail_auth import start_oauth_flow, complete_oauth_flow
 from gmail_service import GmailService
@@ -20,6 +23,8 @@ from email_processor import EmailProcessor
 from watch_scheduler import WatchScheduler
 from pubsub_service import PubSubService
 from config import TOKEN_FILE
+from gmail_login import run_gmail_automation
+from websocket_manager import websocket_endpoint, broadcast_status
 
 from confirmation import send_text
 from pydantic import BaseModel
@@ -55,6 +60,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Store active WebSocket connections
+active_connections: List[WebSocket] = []
+
+@app.websocket("/ws/status")
+async def ws_status(websocket: WebSocket):
+    await websocket_endpoint(websocket)
+
+async def broadcast_status(message: str, status_type: str = "info"):
+    """Broadcast a status message to all connected WebSocket clients"""
+    for connection in active_connections:
+        try:
+            await connection.send_json({
+                "type": status_type,
+                "message": message
+            })
+        except Exception as e:
+            logger.error(f"Error broadcasting to WebSocket: {e}")
+
 # Initialize database
 try:
     db = SupabaseDB()
@@ -69,6 +92,10 @@ scheduler = WatchScheduler(db)
 
 # Initialize PubSub service
 pubsub_service = PubSubService()
+
+# Initialize Gemini
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = GenerativeModel('gemini-2.0-flash')
 
 # --- Refactored Streaming Pull Logic ---
 
@@ -248,6 +275,53 @@ class UnsubscriptionRequest(BaseModel):
 class PubSubMessage(BaseModel):
     message: Dict[str, Any]
     subscription: str
+
+class EmailContent(BaseModel):
+    subject: str
+    sender: str
+    date: str
+    content: str
+
+class UserSettings(BaseModel):
+    headless_selenium: bool = True
+    phone_number: Optional[str] = None
+    auto_send: bool = False
+    auto_spam_recovery: bool = False
+
+class UserSettingsUpdate(BaseModel):
+    headless_selenium: Optional[bool] = None
+    phone_number: Optional[str] = None
+    auto_send: Optional[bool] = None
+    auto_spam_recovery: Optional[bool] = None
+
+class UserSettingsResponse(BaseModel):
+    settings: UserSettings
+
+# Token authentication dependency
+async def get_user_from_token(authorization: str = Header(...)):
+    """
+    Extract user information from token in the Authorization header
+    
+    Token should be in the format: "Bearer <token>"
+    """
+    try:
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Invalid or missing token")
+        
+        token = authorization.replace("Bearer ", "")
+        # Get user data based on token
+        user_data = db.get_user_by_token(token)
+        
+        if not user_data:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+        # Include the raw token in the user data for later use
+        user_data["_raw_token"] = token
+            
+        return user_data
+    except Exception as e:
+        logger.error(f"Error authenticating with token: {str(e)}")
+        raise HTTPException(status_code=401, detail="Authentication failed")
 
 @app.get("/")
 def root():
@@ -832,6 +906,212 @@ async def handle_confirmation(
         db.delete_confirmation(user_email)
 
     return {"status": "received"}
+
+@app.get("/gmail/automate")
+async def run_gmail_automation_route():
+    """Run the Gmail automation script"""
+    try:
+        # Run the automation in a background task
+        result = await asyncio.to_thread(run_gmail_automation)
+        return result
+    except Exception as e:
+        logger.error(f"Error running Gmail automation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/analyze-phishing")
+async def analyze_phishing(email: EmailContent):
+    try:
+        # Create a prompt for Gemini
+        prompt = f"""
+        Analyze this email for phishing risk and provide a score from 0-100% where 0% is definitely safe and 100% is definitely phishing.
+        Consider the following aspects:
+        - Email content and tone
+        - Sender information
+        - Subject line
+        - Any suspicious links or requests
+        - Overall context
+
+        Email Details:
+        Subject: {email.subject}
+        From: {email.sender}
+        Date: {email.date}
+        Content: {email.content}
+
+        Provide ONLY a number between 0 and 100 representing the phishing risk percentage.
+        """
+
+        # Get response from Gemini
+        response = model.generate_content(prompt)
+        
+        # Extract the score from the response
+        try:
+            score = int(response.text.strip().replace('%', ''))
+            # Ensure score is between 0 and 100
+            score = max(0, min(100, score))
+        except ValueError:
+            score = 50  # Default score if parsing fails
+            
+        return {
+            "status": "success",
+            "score": score,
+            "explanation": response.text
+        }
+    except Exception as e:
+        logger.error(f"Error analyzing phishing: {str(e)}")
+        return {
+            "status": "error",
+            "detail": str(e)
+        }
+
+@app.get("/gmail/rescue-spam")
+@app.post("/gmail/rescue-spam")
+async def rescue_misclassified_spam(
+    background_tasks: BackgroundTasks,
+    max_emails: int = 50,
+    periodic_check: bool = False
+):
+    """
+    Scan all spam emails and rescue any that appear to be legitimate.
+    
+    This endpoint:
+    1. Fetches all emails with the SPAM label
+    2. Analyzes each email with Gemini to determine if it's legitimate
+    3. Moves misclassified emails from Spam to Inbox
+    
+    Args:
+        max_emails: Maximum number of spam emails to analyze (default: 50)
+        periodic_check: Whether to schedule recurring checks (default: False)
+    """
+    try:
+        # Initialize Gmail service
+        gmail_service = GmailService()
+        
+        # Initialize the email processor for AI classification
+        email_processor = EmailProcessor()
+        
+        # Get all messages with SPAM label
+        spam_messages = gmail_service.list_messages(max_results=max_emails, label_ids=["SPAM"])
+        
+        if not spam_messages:
+            return {"status": "success", "message": "No spam messages found to analyze"}
+        
+        results = {
+            "analyzed": 0,
+            "rescued": 0,
+            "kept_as_spam": 0,
+            "rescued_emails": []
+        }
+        
+        # Process each spam message
+        for message_meta in spam_messages:
+            message_id = message_meta.get("id")
+            
+            # Get the full message
+            message = gmail_service.get_message(message_id, format="full")
+            
+            # Extract headers and content
+            headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
+            email_content = email_processor._extract_email_content(message)
+            
+            # Extract sender domain from email
+            sender = headers.get("From", "")
+            domain = sender.split('@')[-1].split('>')[0] if '@' in sender else ""
+            subject = headers.get("Subject", "")
+            
+            # Use Gemini to determine if this is really spam
+            classification = email_processor._classify_spam_with_gemini(domain, subject, email_content)
+            
+            results["analyzed"] += 1
+            
+            # If not spam, rescue it
+            if classification == "not spam":
+                # Move from Spam to Inbox
+                gmail_service.modify_message(
+                    message_id=message_id,
+                    add_labels=["INBOX"],
+                    remove_labels=["SPAM"]
+                )
+                
+                results["rescued"] += 1
+                results["rescued_emails"].append({
+                    "from": sender,
+                    "subject": subject,
+                    "preview": email_content[:100] + "..." if len(email_content) > 100 else email_content
+                })
+                
+                logger.info(f"Rescued email from spam: {subject} from {sender}")
+            else:
+                results["kept_as_spam"] += 1
+                logger.info(f"Confirmed spam: {subject} from {sender}")
+        
+        # If periodic check is requested, schedule another check in 24 hours
+        if periodic_check:
+            async def schedule_next_check():
+                await asyncio.sleep(24 * 60 * 60)  # 24 hours in seconds
+                logger.info("Running scheduled spam rescue check")
+                # Run the rescue operation again with the same parameters
+                await rescue_misclassified_spam(background_tasks, max_emails, True)
+            
+            background_tasks.add_task(schedule_next_check)
+            logger.info(f"Scheduled next spam rescue check in 24 hours")
+            results["next_check_scheduled"] = True
+                
+        return {
+            "status": "success",
+            "results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"Error rescuing spam: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/settings")
+async def get_user_settings(user_data: dict = Depends(get_user_from_token)):
+    """Get the authenticated user's settings"""
+    try:
+        # Get settings from user data or create default settings
+        settings = user_data.get('settings', {}) or {}
+        
+        # Apply default values for any missing settings
+        default_settings = UserSettings().dict()
+        for key, value in default_settings.items():
+            if key not in settings:
+                settings[key] = value
+        
+        return {"settings": settings}
+    except Exception as e:
+        logger.error(f"Error retrieving user settings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/settings")
+async def update_user_settings(
+    settings_update: UserSettingsUpdate,
+    user_data: dict = Depends(get_user_from_token)
+):
+    """Update the authenticated user's settings"""
+    try:
+        # Get the raw token from the user data
+        token = user_data.get("_raw_token")
+        if not token:
+            raise HTTPException(status_code=500, detail="Token not found in user data")
+        
+        # Get existing settings or create empty dict
+        current_settings = user_data.get('settings', {}) or {}
+        
+        # Update only the fields that are provided
+        update_dict = {k: v for k, v in settings_update.dict().items() if v is not None}
+        current_settings.update(update_dict)
+        
+        # Save updated settings to database using token
+        updated_data = db.update_user_by_token(token, {"settings": current_settings})
+        
+        if not updated_data:
+            raise HTTPException(status_code=500, detail="Failed to update settings")
+        
+        return {"settings": updated_data.get("settings", {})}
+    except Exception as e:
+        logger.error(f"Error updating user settings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

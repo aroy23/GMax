@@ -1,3 +1,5 @@
+import axios from 'axios';
+
 console.log('Content script loaded');
 
 // Example: Send a message to the background script
@@ -254,8 +256,51 @@ if (window.location.hostname === 'mail.google.com') {
     }
   });
 
-  // Function to add messages to the chat
-  function addMessage(text: string, sender: 'user' | 'bot') {
+  // Add WebSocket connection for status updates
+  let ws: WebSocket | null = null;
+
+  function connectWebSocket() {
+    ws = new WebSocket('ws://localhost:8000/ws/status');
+    
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      const message = data.message;
+      const type = data.type;
+      
+      // Style message based on type
+      let style = '';
+      switch(type) {
+        case 'success':
+          style = 'color: #00ff9d;';
+          break;
+        case 'error':
+          style = 'color: #ff4444;';
+          break;
+        case 'warning':
+          style = 'color: #ffffff;';
+          break;
+        default:
+          style = 'color: #ffffff;';
+      }
+      
+      addMessage(message, 'bot', style);
+    };
+    
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+    
+    ws.onclose = () => {
+      // Attempt to reconnect after 5 seconds
+      setTimeout(connectWebSocket, 5000);
+    };
+  }
+
+  // Connect WebSocket when content script loads
+  connectWebSocket();
+
+  // Modify addMessage function to accept style
+  function addMessage(text: string, sender: 'user' | 'bot', style: string = '') {
     const messageDiv = document.createElement('div');
     messageDiv.style.cssText = `
       padding: 10px 14px;
@@ -268,19 +313,36 @@ if (window.location.hostname === 'mail.google.com') {
         ? 'background: #00ff9d; color: #1a1a1a; align-self: flex-end;' 
         : 'background: #2a2a2a; color: #ffffff; align-self: flex-start;'}
       box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+      ${style}
     `;
     messageDiv.textContent = text;
     messagesContainer.appendChild(messageDiv);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    return messageDiv;
   }
 
   // Function to process user messages
-  function processUserMessage(message: string) {
-    // TODO: Implement message processing logic
-    // For now, just echo the message
-    setTimeout(() => {
-      addMessage(`You said: "${message}"`, 'bot');
-    }, 500);
+  async function processUserMessage(message: string) {
+    if (message.toLowerCase() === 'smart sort' || message.toLowerCase() === 'sort emails') {
+      try {
+        addMessage('Starting smart sort automation...', 'bot', 'color: #40e0d0;');
+        
+        const response = await fetch('http://localhost:8000/gmail/automate');
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+          addMessage('Smart sort completed successfully!', 'bot', 'color: #00ff9d;');
+        } else {
+          addMessage(`Error during smart sort: ${result.detail}`, 'bot', 'color: #ff4444;');
+        }
+      } catch (error) {
+        addMessage(`Failed to run smart sort: ${error}`, 'bot', 'color: #ff4444;');
+      }
+    } else {
+      setTimeout(() => {
+        addMessage(`You said: "${message}"`, 'bot');
+      }, 500);
+    }
   }
 
   // Add welcome message
@@ -560,9 +622,28 @@ if (window.location.hostname === 'mail.google.com') {
     retrainButton.style.boxShadow = 'none';
   });
 
+  async function fetchReTrain() {
+    let loadingMessage = addMessage('Training Persona.', 'bot');
+    let dots = 1;
+    const loadingInterval = setInterval(() => {
+      dots = (dots % 3) + 1;
+      loadingMessage.textContent = 'Training Persona' + '.'.repeat(dots);
+    }, 500);
+
+    try {
+      const response = await axios.get('http://127.0.0.1:8000/index');
+      console.log('Data fetched:', response.data);
+      clearInterval(loadingInterval);
+      addMessage('Persona Trained Successfully!', 'bot');
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      clearInterval(loadingInterval);
+      addMessage('Error training persona. Please try again.', 'bot');
+    }
+  }
+
   retrainButton.addEventListener('click', () => {
-    // TODO: Implement retrain functionality
-    console.log('Retrain clicked');
+    fetchReTrain();
   });
 
   const smartSortButton = document.createElement('button');
@@ -601,137 +682,190 @@ if (window.location.hostname === 'mail.google.com') {
     smartSortButton.style.boxShadow = 'none';
   });
 
-  smartSortButton.addEventListener('click', () => {
-    // TODO: Implement smart sort functionality
-    console.log('Smart Sort clicked');
+  smartSortButton.addEventListener('click', async () => {
+    try {
+      addMessage('Starting smart sort automation...', 'bot', 'color: #40e0d0;');
+      
+      const response = await fetch('http://localhost:8000/gmail/automate');
+      const result = await response.json();
+      
+      if (result.status === 'success') {
+        addMessage('Smart sort completed successfully!', 'bot', 'color: #00ff9d;');
+        if (result.refresh) {
+          // Wait a moment to show the success message before refreshing
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        }
+      } else {
+        addMessage(`Error during smart sort: ${result.detail}`, 'bot', 'color: #ff4444;');
+      }
+    } catch (error) {
+      addMessage(`Failed to run smart sort: ${error}`, 'bot', 'color: #ff4444;');
+    }
   });
 
   quickActionsPanel.appendChild(retrainButton);
   quickActionsPanel.appendChild(smartSortButton);
   document.body.appendChild(quickActionsPanel);
 
-  // Create AI actions panel
-  const aiActionsPanel = document.createElement('div');
-  aiActionsPanel.id = 'ai-actions-panel';
-  aiActionsPanel.style.cssText = `
-    position: relative;
-    background: linear-gradient(145deg, #0a1929, #0d2b3e);
-    border: 1px solid rgba(64, 224, 208, 0.1);
-    padding: 8px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    max-height: 200px;
-    overflow-y: auto;
-    width: calc(100% - 200px);
-    margin: 8px 16px;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    transition: all 0.3s ease;
-  `;
+  // --- AI Actions Panel Logic ---
 
-  // Create header for AI actions panel
-  const aiActionsHeader = document.createElement('div');
-  aiActionsHeader.style.cssText = `
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 4px 0;
-    color: #ffffff;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-  `;
-  aiActionsHeader.innerHTML = `
-    <div style="display: flex; align-items: center; gap: 8px;">
-      <div style="width: 6px; height: 6px; background: #40e0d0; border-radius: 50%; box-shadow: 0 0 8px #40e0d0;"></div>
-      <span>AI Actions</span>
-    </div>
-    <button id="toggle-ai-actions" style="background: none; border: none; color: #ffffff; cursor: pointer; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s;">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-    </button>
-  `;
+  let aiActionsPanelElement: HTMLElement | null = null; // Keep track if the panel exists globally
 
-  // Create actions container with initial collapsed state
-  const actionsContainer = document.createElement('div');
-  actionsContainer.id = 'ai-actions-container';
-  actionsContainer.style.cssText = `
-    display: flex;
-    flex-direction: row;
-    gap: 8px;
-    overflow-x: auto;
-    padding: 4px 0;
-    width: 100%;
-    transition: all 0.3s ease;
-    opacity: 1;
-    max-height: 200px;
-  `;
+  // Function to create and insert the AI Actions Panel
+  function createAndInsertAIActionsPanel() {
+    if (document.getElementById('ai-actions-panel')) {
+        aiActionsPanelElement = document.getElementById('ai-actions-panel'); // Update reference if it somehow exists
+        return; // Panel already exists
+    }
 
-  // Assemble the AI actions panel
-  aiActionsPanel.appendChild(aiActionsHeader);
-  aiActionsPanel.appendChild(actionsContainer);
+    // Use a local const for the element creation
+    const aiActionsPanel = document.createElement('div');
+    aiActionsPanel.id = 'ai-actions-panel';
+    aiActionsPanel.style.cssText = `
+      position: sticky;
+      top: 0; /* Stick to the top of its container */
+      z-index: 9998; /* Ensure it\'s above scrolling content but below chatbox/overlay */
+      background: linear-gradient(145deg, #0a1929, #0d2b3e);
+      border: 1px solid rgba(64, 224, 208, 0.1);
+      padding: 8px 16px;
+      display: flex; /* Start visible */
+      flex-direction: column;
+      gap: 8px;
+      max-height: 200px;
+      overflow-y: auto;
+      width: calc(100% - 32px); /* Adjust width slightly */
+      margin: 0px 16px 8px 16px; /* Add margin */
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      transition: all 0.3s ease;
+    `;
 
-  // Find the AO div and insert the panel before it
-  const aoDiv = document.querySelector('div.AO');
-  if (aoDiv) {
-    aoDiv.parentNode?.insertBefore(aiActionsPanel, aoDiv);
-    setupToggleFunctionality();
-  } else {
-    // If AO div not found, try to find it after a short delay (Gmail might still be loading)
-    setTimeout(() => {
-      const aoDiv = document.querySelector('div.AO');
-      if (aoDiv) {
-        aoDiv.parentNode?.insertBefore(aiActionsPanel, aoDiv);
-        setupToggleFunctionality();
-      } else {
-        console.error('Could not find AO div for AI actions panel placement');
-      }
-    }, 1000);
+    // Create header for AI actions panel
+    const aiActionsHeader = document.createElement('div');
+    aiActionsHeader.style.cssText = `
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 4px 0;
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    `;
+    aiActionsHeader.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div style="width: 6px; height: 6px; background: #40e0d0; border-radius: 50%; box-shadow: 0 0 8px #40e0d0;"></div>
+        <span>AI Actions</span>
+      </div>
+      <button id="toggle-ai-actions" style="background: none; border: none; color: #ffffff; cursor: pointer; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    `;
+
+    // Create actions container
+    const actionsContainer = document.createElement('div');
+    actionsContainer.id = 'ai-actions-container';
+    actionsContainer.style.cssText = `
+      display: flex;
+      flex-direction: row;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 4px 0;
+      width: 100%;
+      transition: all 0.3s ease;
+      opacity: 1;
+      max-height: 200px;
+    `;
+
+    // Assemble the AI actions panel
+    aiActionsPanel.appendChild(aiActionsHeader);
+    aiActionsPanel.appendChild(actionsContainer);
+
+    // Find the AO div's parent and insert the panel
+    const aoDiv = document.querySelector('div.AO');
+    if (aoDiv && aoDiv.parentNode) {
+      // Insert as the first child of aoDiv's parent
+      aoDiv.parentNode.insertBefore(aiActionsPanel, aoDiv.parentNode.firstChild);
+      setupToggleFunctionality(aiActionsPanel, actionsContainer); // Pass the created elements
+      aiActionsPanelElement = aiActionsPanel; // Assign to global tracker upon successful insertion
+    } else {
+      console.error('Could not find AO div or its parent for AI actions panel placement');
+      aiActionsPanelElement = null; // Ensure tracker is null if insertion failed
+      return;
+    }
+
+    // Add some example actions
+    addAIAction('Analyzed email content for sentiment', new Date());
+    addAIAction('Generated response draft', new Date());
+    addAIAction('Suggested email categorization', new Date());
   }
 
   // Function to setup toggle functionality
-  function setupToggleFunctionality() {
-    const toggleButton = document.getElementById('toggle-ai-actions');
-    if (toggleButton) {
-      toggleButton.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const isCollapsed = actionsContainer.style.maxHeight === '0px';
-        
-        if (isCollapsed) {
-          actionsContainer.style.maxHeight = '200px';
-          actionsContainer.style.opacity = '1';
-          actionsContainer.style.padding = '4px 0';
-          toggleButton.innerHTML = `
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          `;
-        } else {
-          actionsContainer.style.maxHeight = '0px';
-          actionsContainer.style.opacity = '0';
-          actionsContainer.style.padding = '0';
-          toggleButton.innerHTML = `
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M7 14l5-5 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          `;
-        }
-      });
+  function setupToggleFunctionality(panel: HTMLElement, container: HTMLElement) {
+      const toggleButton = panel.querySelector<HTMLButtonElement>('#toggle-ai-actions');
+      // Use a more specific selector for the header div containing the button
+      const header = panel.querySelector<HTMLElement>('div[style*="justify-content: space-between"]');
 
-      // Add click handler to header for toggling
-      aiActionsHeader.addEventListener('click', (e) => {
-        if (e.target !== toggleButton) {
-          toggleButton.click();
-        }
-      });
-    }
+      if (toggleButton && header) {
+          toggleButton.addEventListener('click', (e) => {
+              e.stopPropagation(); // Prevent event bubbling to header click listener
+              const isCollapsed = container.style.maxHeight === '0px';
+
+              if (isCollapsed) {
+                  // Expand
+                  container.style.maxHeight = '200px'; // Set max-height for animation
+                  container.style.opacity = '1';
+                  container.style.padding = '4px 0'; // Restore padding
+                  toggleButton.innerHTML = `
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                  `; // Down arrow
+              } else {
+                  // Collapse
+                  container.style.maxHeight = '0px'; // Collapse
+                  container.style.opacity = '0';
+                  container.style.padding = '0'; // Remove padding when collapsed
+                  toggleButton.innerHTML = `
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M7 14l5-5 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                  `; // Up arrow
+              }
+          });
+
+          // Add click handler to header for toggling, ensuring button click doesn't trigger it
+          header.addEventListener('click', (e) => {
+               // Ensure the click target is the header itself or its direct children, not the button
+               if (e.target === header || (e.target instanceof HTMLElement && e.target.parentElement === header && e.target.tagName !== 'BUTTON')) {
+                   toggleButton.click();
+               }
+          });
+      } else {
+           console.error("Could not find toggle button or header for AI Actions Panel.");
+      }
   }
 
   // Function to add a new action
   function addAIAction(action: string, timestamp: Date) {
+    // Use the global tracker or get element by ID
+    const panel = aiActionsPanelElement ?? document.getElementById('ai-actions-panel');
+    if (!panel) {
+        console.warn("AI Actions Panel element not found when trying to add action.");
+        return;
+    }
+    const actionsContainer = panel.querySelector<HTMLElement>('#ai-actions-container');
+
+    if (!actionsContainer) {
+        console.error("AI Actions container not found within the panel.");
+        return;
+    }
+
     const actionElement = document.createElement('div');
     actionElement.style.cssText = `
       min-width: 180px;
@@ -747,42 +881,62 @@ if (window.location.hostname === 'mail.google.com') {
       gap: 4px;
       flex-shrink: 0;
     `;
-    
-    const timeString = timestamp.toLocaleTimeString();
+
+    const timeString = timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); // Format time H:MM AM/PM
     actionElement.innerHTML = `
       <div style="color: #40e0d0; font-size: 12px;">${timeString}</div>
-      <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${action}</div>
+      <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${action}">${action}</div>
     `;
 
+    // Insert new action at the beginning
     actionsContainer.insertBefore(actionElement, actionsContainer.firstChild);
-    
-    // Limit to 5 actions
-    if (actionsContainer.children.length > 5) {
-      actionsContainer.removeChild(actionsContainer.lastChild!);
+
+    // Limit to 5 actions by removing the last child if count exceeds 5
+    while (actionsContainer.children.length > 5) {
+        if (actionsContainer.lastChild) { // Check if lastChild exists before removing
+            actionsContainer.removeChild(actionsContainer.lastChild);
+        } else {
+            break; // Should not happen, but break loop if lastChild is somehow null
+        }
     }
   }
 
-  // Example usage:
-  addAIAction('Analyzed email content for sentiment', new Date());
-  addAIAction('Generated response draft', new Date());
-  addAIAction('Suggested email categorization', new Date());
+  // Function to check URL and update AI Actions Panel visibility
+  function updateAIActionsVisibility() {
+      const currentHash = window.location.hash;
+      // Simple check: Show if hash is #inbox or empty/root, hide otherwise (specifically if it contains '/')
+      const isOnInbox = currentHash === '#inbox' || currentHash === '' || currentHash === '#';
+      const panel = aiActionsPanelElement ?? document.getElementById('ai-actions-panel');
 
-  // Add styles for quick actions panel
-  const quickActionsStyle = document.createElement('style');
-  quickActionsStyle.textContent = `
-    #quick-actions-panel {
-      min-width: 120px;
-    }
-    
-    #quick-actions-panel button {
-      white-space: nowrap;
-    }
-    
-    #quick-actions-panel button:hover {
-      transform: translateY(-1px);
-    }
-  `;
-  document.head.appendChild(quickActionsStyle);
+      // console.log(`Hash changed: ${currentHash}, isOnInbox: ${isOnInbox}`); // Optional debug log
+
+      if (isOnInbox) {
+          if (!panel) {
+              // console.log("Creating AI Actions Panel..."); // Optional debug log
+              createAndInsertAIActionsPanel(); // Create and insert if on inbox and it doesn't exist
+          } else {
+              // console.log("Showing AI Actions Panel..."); // Optional debug log
+              panel.style.display = 'flex'; // Ensure it's visible if it exists
+          }
+      } else {
+          // Not on inbox view
+          if (panel) {
+              // console.log("Hiding AI Actions Panel..."); // Optional debug log
+              panel.style.display = 'none'; // Hide if it exists
+          }
+      }
+  }
+
+  // --- End AI Actions Panel Logic ---
+
+  // --- Initialize Visibility and Listen for Changes ---
+  // Initial check when script loads
+  // Use a small delay to ensure Gmail UI is likely ready for DOM manipulation
+  setTimeout(updateAIActionsVisibility, 500);
+
+  // Listen for hash changes to toggle visibility
+  window.addEventListener('hashchange', updateAIActionsVisibility);
+  // --- End Initialization ---
 
   // Add phishing score indicator
   const phishingScoreContainer = document.createElement('div');
@@ -850,14 +1004,14 @@ if (window.location.hostname === 'mail.google.com') {
     font-size: 20px;
     font-weight: 600;
   `;
-  scoreValue.textContent = '50%';
+  scoreValue.textContent = '0%';
 
   const scoreDescription = document.createElement('div');
   scoreDescription.style.cssText = `
     color: #a0a0a0;
     font-size: 13px;
   `;
-  scoreDescription.textContent = 'Moderate risk level detected';
+  scoreDescription.textContent = '';
 
   topRow.appendChild(scoreIcon);
   topRow.appendChild(scoreTitle);
@@ -866,36 +1020,229 @@ if (window.location.hostname === 'mail.google.com') {
   phishingScoreContainer.appendChild(topRow);
   phishingScoreContainer.appendChild(bottomRow);
 
-  // Function to show phishing score
+  // Add debouncing and tracking
+  let lastProcessedEmailId: string | null = null;
+  let processingTimeout: number | null = null;
+
+  // Function to show phishing score - create a new container each time
   function showPhishingScore() {
+    // Remove any existing containers first
+    document.querySelectorAll('[id="phishing-score-container"]').forEach(container => {
+      // Clear any animation interval
+      if ((container as HTMLElement).dataset && (container as HTMLElement).dataset.counterInterval) {
+        clearInterval(Number((container as HTMLElement).dataset.counterInterval));
+        delete (container as HTMLElement).dataset.counterInterval;
+      }
+      
+      // Remove the element and its wrapper if they exist
+      if (container.parentElement) {
+        container.parentElement.remove();
+      } else if (document.body.contains(container)) {
+        container.remove();
+      }
+    });
+    
+    // Find the email content container
     const emailContent = document.querySelector('div.aHU.hx');
-    if (emailContent) {
-      // Create a wrapper div for better positioning
-      const wrapper = document.createElement('div');
-      wrapper.style.cssText = `
-        display: flex;
-        justify-content: start;
-        width: 100%;
-        padding-left: 72px;
-      `;
-      wrapper.appendChild(phishingScoreContainer);
-      emailContent.parentNode?.insertBefore(wrapper, emailContent);
+    if (!emailContent) {
+      console.log('Email content not found for phishing score');
+      return; // No email content found
     }
+    
+    // Create a NEW phishing score container each time
+    // This ensures we're not reusing a container that might have been modified or removed
+    const phishingContainer = document.createElement('div');
+    phishingContainer.id = 'phishing-score-container';
+    phishingContainer.style.cssText = `
+      position: relative;
+      background: linear-gradient(145deg, #0a1929, #0d2b3e);
+      border: 1px solid rgba(64, 224, 208, 0.1);
+      padding: 12px 16px;
+      margin: 16px 0px 0px 0px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      width: fit-content;
+      max-width: 300px;
+    `;
+
+    // Create the top row with icon and title
+    const topRow = document.createElement('div');
+    topRow.style.cssText = `
+      display: flex;
+      align-items: center; 
+      gap: 8px;
+      margin-bottom: 4px;
+    `;
+
+    const scoreIcon = document.createElement('div');
+    scoreIcon.style.cssText = `
+      width: 20px;
+      height: 20px;
+      background: rgba(64, 224, 208, 0.1);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
+    scoreIcon.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" fill="#40e0d0"/>
+      </svg>
+    `;
+
+    const scoreTitle = document.createElement('div');
+    scoreTitle.style.cssText = `
+      color: #ffffff;
+      font-weight: 500;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    `;
+    scoreTitle.innerHTML = `
+      <span>Phishing Risk Assessment</span>
+      <div style="width: 6px; height: 6px; background: #40e0d0; border-radius: 50%; box-shadow: 0 0 8px #40e0d0;"></div>
+    `;
+
+    // Create the bottom row with score value and description
+    const bottomRow = document.createElement('div');
+    bottomRow.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    `;
+
+    // Score value starts at 0%
+    const scoreValue = document.createElement('div');
+    scoreValue.style.cssText = `
+      color: #40e0d0;
+      font-size: 20px;
+      font-weight: 600;
+    `;
+    scoreValue.textContent = '0%';
+
+    const scoreDescription = document.createElement('div');
+    scoreDescription.style.cssText = `
+      color: #a0a0a0;
+      font-size: 13px;
+    `;
+    scoreDescription.textContent = '';
+
+    // Assemble the component
+    topRow.appendChild(scoreIcon);
+    topRow.appendChild(scoreTitle);
+    bottomRow.appendChild(scoreValue);
+    bottomRow.appendChild(scoreDescription);
+    phishingContainer.appendChild(topRow);
+    phishingContainer.appendChild(bottomRow);
+    
+    // Create a wrapper div for better positioning
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = `
+      display: flex;
+      justify-content: start;
+      width: 100%;
+      padding-left: 72px;
+    `;
+    wrapper.appendChild(phishingContainer);
+    
+    // Add to the DOM
+    emailContent.parentNode?.insertBefore(wrapper, emailContent);
+    
+    // Start animation counter
+    let counter = 0;
+    const increment = 3; // Speed of counting
+    const maxCountTo = 95; // Don't go to 100% while loading
+    
+    const counterInterval = setInterval(() => {
+      counter += increment;
+      if (counter >= maxCountTo) {
+        counter = maxCountTo; // Cap at maxCountTo while loading
+        clearInterval(counterInterval); // Stop incrementing when reached maxCountTo
+      }
+      scoreValue.textContent = `${counter}%`;
+      
+      // Change color based on the current count
+      let color = '#40e0d0'; // Default teal for low values
+      if (counter > 70) {
+        color = '#ff4444'; // Red for high values
+      } else if (counter > 30) {
+        color = '#ffaa00'; // Orange for medium values
+      }
+      scoreValue.style.color = color;
+    }, 80); // Update every 80ms for smooth animation
+    
+    // Store the interval ID on the score container to clear it later
+    phishingContainer.dataset.counterInterval = String(counterInterval);
+    
+    return phishingContainer; // Return the created container for reference
   }
 
   // Listen for email opens
-  const observer = new MutationObserver((mutations) => {
+  const emailObserver = new MutationObserver((mutations) => {
     mutations.forEach((mutation) => {
       if (mutation.addedNodes.length) {
         const emailContent = document.querySelector('div.gA.gt.acV');
-        if (emailContent && !document.getElementById('phishing-score-container')) {
-          showPhishingScore();
+        if (emailContent) {
+          // Get the current email ID to track if it's the same email
+          const currentEmailId = window.location.hash;
+          
+          // Only process if it's a different email or if we haven't processed any email yet
+          if (currentEmailId !== lastProcessedEmailId) {
+            // Clear any existing timeout
+            if (processingTimeout) {
+              clearTimeout(processingTimeout);
+              processingTimeout = null;
+            }
+            
+            // Hide and clean up any existing phishing score containers
+            // Use a simple approach that won't interfere with creating new ones
+            document.querySelectorAll('[id="phishing-score-container"]').forEach(wrapper => {
+              // First hide it immediately to prevent flashing
+              (wrapper as HTMLElement).style.display = 'none';
+              
+              // Clear interval if exists
+              if ((wrapper as HTMLElement).dataset && (wrapper as HTMLElement).dataset.counterInterval) {
+                clearInterval(Number((wrapper as HTMLElement).dataset.counterInterval));
+              }
+              
+              // Mark for removal
+              wrapper.setAttribute('data-remove', 'true');
+            });
+            
+            // Reset the lastProcessedEmailId until we finish processing this one
+            lastProcessedEmailId = null;
+            
+            // Set a new timeout to process the email - adding a delay to ensure UI is ready
+            processingTimeout = window.setTimeout(() => {
+              // Remove containers marked for removal to ensure clean state
+              document.querySelectorAll('[data-remove="true"]').forEach(el => {
+                if (el.parentElement) {
+                  el.parentElement.remove();
+                } else if (document.body.contains(el)) {
+                  el.remove();
+                }
+              });
+              
+              // Show new phishing score - let's add logging to debug
+              console.log('Creating new phishing score');
+              const scoreContainer = showPhishingScore();
+              console.log('Phishing score created:', scoreContainer);
+              
+              // Extract email content
+              const emailData = extractEmailContent();
+              if (emailData) {
+                console.log('Email data extracted:', emailData);
+                lastProcessedEmailId = currentEmailId;
+              }
+            }, 300); // Slightly longer delay to ensure UI is ready
+          }
         }
       }
     });
   });
 
-  observer.observe(document.body, {
+  emailObserver.observe(document.body, {
     childList: true,
     subtree: true
   });
@@ -981,4 +1328,133 @@ if (window.location.hostname === 'mail.google.com') {
     }
   `;
   document.head.appendChild(aiActionsStyle);
+
+  // Add function to extract email content
+  async function extractEmailContent() {
+    // Find the email content container
+    const emailContent = document.querySelector('div.aHU.hx');
+    if (emailContent) {
+      // Get the email content
+      const content = emailContent.textContent || '';
+      
+      // Get other email details
+      const subject = document.querySelector('h2.hP')?.textContent || '';
+      const sender = document.querySelector('span.gD')?.textContent || '';
+      const date = document.querySelector('span.g3')?.textContent || '';
+      
+      // Create an object with the email data
+      const emailData = {
+        subject,
+        sender,
+        date,
+        content
+      };
+      
+      try {
+        // Send to backend for analysis
+        const response = await fetch('http://localhost:8000/analyze-phishing', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(emailData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+          // Clear any existing animation interval
+          const scoreContainer = document.getElementById('phishing-score-container');
+          if (scoreContainer && scoreContainer.dataset.counterInterval) {
+            clearInterval(Number(scoreContainer.dataset.counterInterval));
+            delete scoreContainer.dataset.counterInterval;
+          }
+          
+          // Update the phishing score display
+          if (scoreContainer) {
+            const scoreValue = scoreContainer.querySelector('div[style*="font-size: 20px"]');
+            if (scoreValue) {
+              // Animate to the final score
+              const currentScore = parseInt(scoreValue.textContent || '0', 10);
+              const targetScore = result.score;
+              
+              // If the current score is already higher than the target, just set it directly
+              if (currentScore >= targetScore) {
+                scoreValue.textContent = `${targetScore}%`;
+                
+                // Update color based on score
+                let color = '#40e0d0'; // Default teal
+                if (targetScore > 70) {
+                  color = '#ff4444'; // Red for high risk
+                } else if (targetScore > 30) {
+                  color = '#ffaa00'; // Orange for medium risk
+                }
+                
+                (scoreValue as HTMLElement).style.color = color;
+              } else {
+                // Animate to the final score
+                const animateToFinal = setInterval(() => {
+                  const current = parseInt(scoreValue.textContent || '0', 10);
+                  const newValue = Math.min(current + 5, targetScore);
+                  scoreValue.textContent = `${newValue}%`;
+                  
+                  // Update color based on the current value
+                  let color = '#40e0d0'; // Default teal
+                  if (newValue > 70) {
+                    color = '#ff4444'; // Red for high risk
+                  } else if (newValue > 30) {
+                    color = '#ffaa00'; // Orange for medium risk
+                  }
+                  
+                  (scoreValue as HTMLElement).style.color = color;
+                  
+                  if (newValue >= targetScore) {
+                    clearInterval(animateToFinal);
+                  }
+                }, 50);
+              }
+              
+              // Update description
+              const description = scoreContainer.querySelector('div[style*="color: #a0a0a0"]');
+              if (description) {
+                let riskLevel = 'Low';
+                if (result.score > 70) {
+                  riskLevel = 'High';
+                } else if (result.score > 30) {
+                  riskLevel = 'Moderate';
+                }
+                description.textContent = `${riskLevel} risk level detected`;
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error analyzing phishing:', error);
+        
+        // Clear animation and show error in case of failure
+        const scoreContainer = document.getElementById('phishing-score-container');
+        if (scoreContainer && scoreContainer.dataset.counterInterval) {
+          clearInterval(Number(scoreContainer.dataset.counterInterval));
+          delete scoreContainer.dataset.counterInterval;
+        }
+        
+        if (scoreContainer) {
+          const scoreValue = scoreContainer.querySelector('div[style*="font-size: 20px"]');
+          const description = scoreContainer.querySelector('div[style*="color: #a0a0a0"]');
+          
+          if (scoreValue) {
+            scoreValue.textContent = 'N/A';
+            (scoreValue as HTMLElement).style.color = '#a0a0a0';
+          }
+          
+          if (description) {
+            description.textContent = 'Could not analyze risk level';
+          }
+        }
+      }
+      
+      return emailData;
+    }
+    return null;
+  }
 }
