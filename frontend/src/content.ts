@@ -1,3 +1,14 @@
+import axios from 'axios';
+
+async function fetchReTrain() {
+  try {
+    const response = await axios.get('http://127.0.0.1:8000/index');
+    console.log('Data fetched:', response.data);
+  } catch (error) {
+    console.error('Error fetching data:', error);
+  }
+}
+
 console.log('Content script loaded');
 
 // Example: Send a message to the background script
@@ -561,8 +572,7 @@ if (window.location.hostname === 'mail.google.com') {
   });
 
   retrainButton.addEventListener('click', () => {
-    // TODO: Implement retrain functionality
-    console.log('Retrain clicked');
+    fetchReTrain();
   });
 
   const smartSortButton = document.createElement('button');
