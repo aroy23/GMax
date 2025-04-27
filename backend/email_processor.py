@@ -3,8 +3,14 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 import time
 import base64
+import google.generativeai as genai
 
 from gmail_service import GmailService
+from config import GEMINI_API_KEY
+
+
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-2.0-flash")
 
 class EmailProcessor:
     """Email processor for handling new messages"""
@@ -118,30 +124,47 @@ class EmailProcessor:
             # Print email details to console
             self._print_email_details(headers, email_content)
 
-            #THREE CHOIECS: SPAM, REPLY, DONT REPLY
+            # Use Gemini to classify if the email is spam
+            is_spam = False
+            spam_classification = "none"
+            try:
+                # Extract sender domain from email
+                sender = headers.get("From", "")
+                domain = sender.split('@')[-1].split('>')[0] if '@' in sender else ""
+                subject = headers.get("Subject", "")
+                
+                # Classify using Gemini
+                spam_classification = self._classify_spam_with_gemini(domain, subject, email_content)
+                
+                if spam_classification == "spam":
+                    is_spam = True
+                    self.gmail_service.modify_message(message_id, add_labels=['SPAM'])
+                elif spam_classification == "not spam":
+                    print("NOT SPAM")
+            except Exception as e:
+                print(f"Error classifying with Gemini: {e}")
 
-            #Handle spam messages
-
-            #Handle reply messages
-            self.gmail_service.reply(db, message_id)
-
-            #Handle dont reply messages
-
-            
-            # Example: Check if message looks like spam (very simplistic)
-            # is_spam = False
-            # if 'Subject' in headers:
-            #     spam_keywords = ['viagra', 'lottery', 'winner', 'free money', 'investment opportunity']
-            #     if any(keyword in headers['Subject'].lower() for keyword in spam_keywords):
-            #         is_spam = True
-            #         self.gmail_service.modify_message(message_id, add_labels=['SPAM'])
+            reply_classification = "none"
+            try:
+                # Extract sender domain from email
+                sender = headers.get("From", "")
+                domain = sender.split('@')[-1].split('>')[0] if '@' in sender else ""
+                subject = headers.get("Subject", "")
+                reply_classification = self._classify_reply_with_gemini(domain, subject, email_content)
+                
+                if reply_classification == "reply":
+                    self.gmail_service.reply(db, message_id)
+                elif reply_classification == "no reply":
+                    print("NO REPLY")
+            except Exception as e:
+                print(f"Error classifying with Gemini: {e}")
             
             return {
                 "messageId": message_id,
                 "threadId": message.get("threadId"),
                 "processed": True,
                 "timestamp": datetime.now().isoformat(),
-                "action": "spam_detected" if is_spam else "inbox_kept",
+                "action": spam_classification,
                 "from": headers.get("From", ""),
                 "to": headers.get("To", ""),
                 "subject": headers.get("Subject", ""),
@@ -299,4 +322,99 @@ class EmailProcessor:
                 "labelsAdded": labels_added,
                 "labelsRemoved": labels_removed,
                 "error": str(e)
-            } 
+            }
+    
+    def _classify_spam_with_gemini(self, domain: str, subject: str, content: str) -> str:
+        """
+        Use Gemini to classify an email as spam, reply, or don't reply
+        
+        Args:
+            domain: The sender's domain
+            subject: The email subject
+            content: The email content
+            
+        Returns:
+            Classification: "spam", "not spam"
+        """
+        try:
+            
+            # Create prompt with email details
+            prompt = f"""
+            Please classify this email as either "spam", or "not spam" based on the following information:
+            
+            From domain: {domain}
+            Subject: {subject}
+            
+            Email content:
+            {content}
+            
+            Return only ONLY '1' if it is spam, or '0' if it is not spam. Do not return anything else.
+            """
+            
+            # Get response from Gemini
+            response = model.generate_content(prompt)
+            
+            # Extract classification
+            result = response.text.strip()
+            
+            # Validate result
+            if result == "1":
+                return "spam"
+            elif result == "0":
+                return "not spam"
+            else:
+                # Default to not replying if classification is unclear
+                print(f"Invalid classification from Gemini: {result}")
+                return "not spam"
+                
+        except Exception as e:
+            print(f"Error with Gemini classification: {e}")
+            # Default to not replying if there's an error
+            return "not spam" 
+    
+    def _classify_reply_with_gemini(self, domain: str, subject: str, content: str) -> str:
+        """
+        Use Gemini to classify an email as spam, reply, or don't reply
+        
+        Args:
+            domain: The sender's domain
+            subject: The email subject
+            content: The email content
+            
+        Returns:
+            Classification: "reply", or "dont_reply"
+        """
+        try:
+            # Create prompt with email details
+            prompt = f"""
+            Please classify this email as either "reply", or "dont_reply" based on the following information:
+            
+            From domain: {domain}
+            Subject: {subject}
+            
+            Email content:
+            {content}
+            
+            Return only ONLY '1' if it is an email that you should reply to, or '0' if it is not an email you should reply to. Do not return anything else.
+            """
+            
+            # Get response from Gemini
+            response = model.generate_content(prompt)
+            
+            # Extract classification
+            result = response.text.strip()
+            
+            # Validate result
+            if result == "1":
+                return "reply"
+            elif result == "0":
+                return "no reply"
+            else:
+                # Default to not replying if classification is unclear
+                print(f"Invalid classification from Gemini: {result}")
+                return "no reply" 
+                    
+        except Exception as e:
+            print(f"Error with Gemini classification: {e}")
+            # Default to not replying if there's an error
+            return "no reply" 

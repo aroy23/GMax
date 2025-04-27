@@ -457,9 +457,7 @@ class GmailService:
 
             user_data = db.get_user_data(user_email)
             persona = user_data.get("persona") if user_data else None
-            print("testttttt")
             if persona:
-                print("persona!")
                 # original_content = "Hello!\n\nMy name is Bob Dylan."
                 original_email = self.get_message(original_email_id)
                 payload = original_email["payload"]
@@ -471,7 +469,6 @@ class GmailService:
                         if part["mimeType"] == "text/plain" and part.get("body", {}).get("data"):
                             original_body = self.gmail_body_to_text(part["body"]["data"])
                 
-                print("another test!")
                 sent_from = 'Unknown'
                 subject = 'No Subject'
                 message_id_header = ''
@@ -490,7 +487,6 @@ class GmailService:
                 message_content = model.generate_content(
                     "Taking into account the sender (and their email address) and subject and body, give me a plain string response to this email below:\n\n" + email + '\n\nUse this as the persona of the responder and act as them fully:\n\n' + persona
                 )
-                print("gemini test!")
 
                 if not subject.lower().startswith("re:"):
                     subject = "Re: " + subject
