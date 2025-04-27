@@ -455,14 +455,13 @@ def start_watch(request: WatchRequest):
         # Option 2: Get from env var directly
         # topic_name = os.getenv("PUB SUB_TOPIC_NAME", "gmail-notifications") 
         # Option 3: Hardcode (less flexible)
-        # topic_name = "gmail-notifications"
+        #topic_name = "gmail-notifications"
         
         if not topic_name:
-             raise HTTPException(status_code=500, detail="Pub/Sub topic name not configured.")
+            raise HTTPException(status_code=500, detail="Pub/Sub topic name not configured.")
              
         logger.info(f"Starting Gmail watch for {request.user_id} targeting Pub/Sub topic: {topic_name}")
         watch_response = gmail_service_sync.start_watch(
-            topic_name=topic_name, # Pass topic name
             label_ids=request.label_ids
         )
 
@@ -800,12 +799,6 @@ def index():
     gmail_service = GmailService()
     return gmail_service.indexer(db)
 
-@app.get("/send-text")
-def send_text_confirmation():
-    print("sending text!")
-    send_text("4082036222", "Reply YES or NO", "https://dccb-164-67-70-232.ngrok-free.app/handle-confirmation")
-    return {"status": "sent"}
-
 class SmsReply(BaseModel):
     textId: str
     fromNumber: str
@@ -819,6 +812,7 @@ async def handle_confirmation(
     x_textbelt_timestamp: str = Header(..., alias="X-textbelt-timestamp"),
     x_textbelt_signature: str = Header(..., alias="X-textbelt-signature"),
 ):
+    print("handle confirmation")
     gmail_service = GmailService()
     profile = gmail_service.service.users().getProfile(userId="me").execute()  
     user_email = profile["emailAddress"]

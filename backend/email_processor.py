@@ -133,7 +133,7 @@ class EmailProcessor:
             print(draft)
             content = f"Hi, This is EmailBot! You have received an email:\n\nFrom: {self.parse_email(sent_from)}\n\n{email_content}\n\n-------------\n\nWould you like the following response below to be a reply? Reply YES or NO.\n\n{draft['content']}"
             print(content)
-            res = send_text(phone_number, content)
+            res = send_text(phone_number, content, True)
             print(res)
             db.create_confirmation(user_email, message_id, draft['content'])
 

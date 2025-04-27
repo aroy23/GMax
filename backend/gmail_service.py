@@ -405,44 +405,7 @@ class GmailService:
 #     return {"Hello": "World"}
 
     # @app.get("/send")
-    def send(self):
-        try:
-            profile = self.service.users().getProfile(userId="me").execute()  
-            user_email = profile["emailAddress"]
-
-            message = EmailMessage()
-
-            user_data = db.get_user_data(user_email)
-            persona = user_data.get("persona") if user_data else None
-
-            if persona:
-                original_content = "Hello!\n\nMy name is Bob Dylan."
-                message_content = model.generate_content(
-                    "Give me a plain string response to this email below:\n\n" + original_content + '\n\nUse this as the persona of the responder and act as them fully:\n\n' + persona
-                )
-            
-                message.set_content(message_content.text)
-                message["To"] = "fermatjw@gmail.com"
-                message["From"] = user_email
-                message["Subject"] = "Automated draft"
-
-                # encoded message
-                encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
-
-                create_message = {"raw": encoded_message}
-                send_message = (
-                    self.service.users()
-                    .messages()
-                    .send(userId="me", body=create_message)
-                    .execute()
-                )
-
-                return {"Message id": send_message["id"]}
-
-        except HttpError as error:
-            print(f"An error occurred: {error}")
-            send_message = None
-            return {"Status": "Failed!"}
+   
 
     def gmail_body_to_text(self,data: str) -> str:
         b64 = data.replace("-", "+").replace("_", "/")
@@ -526,7 +489,7 @@ class GmailService:
                 email = f'\nSTART OF EMAIL\nFrom: {sent_from}\nSubject: {subject}\nBody:\n{original_body}\n'
 
                 message_content = model.generate_content(
-                    "Taking into account the sender (and their email address) and subject and body, give me a plain string response to this email below:\n\n" + email + '\n\nUse this as the persona of the responder and act as them fully:\n\n' + persona
+                    "Taking into account the sender (and their email address) and subject and body, give me a plain string response to this email below:\n\n" + email + '\n\nUse this as the persona of the responder and act as them fully:\n\n' + persona + 'Only include the response body, no other text.'
                 )
                 
                 draft = {}
@@ -588,7 +551,7 @@ class GmailService:
                 emails.append(email)
 
             persona_response = model.generate_content(
-                "Take these 5 emails below and give me a plain string prompt that you can take in as a plain string later that acts as a persona that captures the email writing style of the sender, recognizing tone and levels of professionalism by also taking into account the address the email is sent to:\n\n" + str([m.get("snippet") + "\n\n" for m in selected_messages])
+                "Take these 5 emails below and give me a plain string prompt that you can take in as a plain string later that acts as a persona that captures the email writing style of the sender, recognizing tone and levels of professionalism by also taking into account the address the email is sent to:\n\n" + str([m.get("snippet") + "\n\n" for m in selected_messages]) + "Only include the response body, no other text"
             )
             
             persona = persona_response.text
