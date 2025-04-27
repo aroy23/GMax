@@ -1,0 +1,14 @@
+# Google Cloud Project ID
+GOOGLE_CLOUD_PROJECT_ID=your-project-id
+
+# Path to client secret file for OAuth
+GOOGLE_CLIENT_SECRET_FILE=client_secret.json
+
+# Your OAuth redirect URI
+OAUTH_REDIRECT_URI=http://localhost:3000/auth/callback
+
+# Supabase configuration
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_KEY=your-supabase-anon-key 
+
+GEMINI_API_KEY=your_gemini_key
