@@ -1,14 +1,5 @@
 import axios from 'axios';
 
-async function fetchReTrain() {
-  try {
-    const response = await axios.get('http://127.0.0.1:8000/index');
-    console.log('Data fetched:', response.data);
-  } catch (error) {
-    console.error('Error fetching data:', error);
-  }
-}
-
 console.log('Content script loaded');
 
 // Example: Send a message to the background script
@@ -283,6 +274,7 @@ if (window.location.hostname === 'mail.google.com') {
     messageDiv.textContent = text;
     messagesContainer.appendChild(messageDiv);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    return messageDiv;
   }
 
   // Function to process user messages
@@ -570,6 +562,26 @@ if (window.location.hostname === 'mail.google.com') {
     retrainButton.style.borderColor = 'rgba(64, 224, 208, 0.2)';
     retrainButton.style.boxShadow = 'none';
   });
+
+  async function fetchReTrain() {
+    let loadingMessage = addMessage('Training Persona.', 'bot');
+    let dots = 1;
+    const loadingInterval = setInterval(() => {
+      dots = (dots % 3) + 1;
+      loadingMessage.textContent = 'Training Persona' + '.'.repeat(dots);
+    }, 500);
+
+    try {
+      const response = await axios.get('http://127.0.0.1:8000/index');
+      console.log('Data fetched:', response.data);
+      clearInterval(loadingInterval);
+      addMessage('Persona Trained Successfully!', 'bot');
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      clearInterval(loadingInterval);
+      addMessage('Error training persona. Please try again.', 'bot');
+    }
+  }
 
   retrainButton.addEventListener('click', () => {
     fetchReTrain();
