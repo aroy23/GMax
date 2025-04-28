@@ -1,5 +1,5 @@
 # GMax
-An AI-powered email assistant that automatically processes, analyzes, and responds to emails.
+An AI-powered Chrome extension email assistant that automatically processes, analyzes, and responds to emails.
 
 ## Inspiration
 GMax was created to address the growing problem of email overload. The average professional spends 28% of their workday reading and responding to emails, which amounts to 2.6 hours per day and 13 hours per week. This significant time investment reduces productivity and adds stress to daily work life. By leveraging AI to handle routine email interactions, GMax aims to give people back their time while ensuring important communications are still handled appropriately.
