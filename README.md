@@ -2,7 +2,7 @@
 **Recipient of the first-place prize at LA Hacks 2025 for the MSI Track**
 
 ## Overview
-An AI-powered Chrome extension email assistant that automatically processes, analyzes, and responds to emails.<br>
+An AI-powered Chrome extension email assistant that automatically processes, organizes, analyzes, and responds to emails.<br>
 ![image](https://github.com/user-attachments/assets/3d79f5ad-cdf5-4cc5-94c7-ea0d9be1ae4c)
 
 ## Inspiration
