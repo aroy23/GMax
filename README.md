@@ -34,7 +34,7 @@ GMax is a sophisticated email management system that uses AI to automatically pr
 - **Settings Management**: User interface for configuring automation preferences.
 - **Quick Actions**: Quick buttons to perform important workflows
 
-## Libraries Used
+## Technologies
 
 ### Backend
 - **FastAPI**: Web framework for building APIs with Python.
