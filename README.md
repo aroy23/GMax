@@ -48,9 +48,6 @@ GMax is a sophisticated email management system that uses AI to automatically pr
 - **Supabase**: Database for storing user data and email processing history.
 - **Selenium**: Automation for labeling emails
 - **WebSockets**: For real-time communication with the frontend.
-- **Pydantic**: Data validation and settings management.
-- **Httpx**: HTTP client for making API requests.
-- **Python-dotenv**: For environment variable management.
 - **Textbelt**: SMS notifications and confirmations
 
 ### Frontend
