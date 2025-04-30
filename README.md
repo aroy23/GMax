@@ -46,6 +46,7 @@ GMax is a sophisticated email management system that uses AI to automatically pr
 - **Google Cloud Pub/Sub**: For real-time push notifications.
 - **Google Generative AI**: Integration with Gemini for email analysis and response generation.
 - **Supabase**: Database for storing user data and email processing history.
+- **Selenium**: Automation for labeling emails
 - **WebSockets**: For real-time communication with the frontend.
 - **Pydantic**: Data validation and settings management.
 - **Httpx**: HTTP client for making API requests.
